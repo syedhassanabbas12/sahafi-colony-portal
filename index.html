@@ -159,7 +159,7 @@
       allBloodGroups:"All blood groups", call:"Call",
       collectionsTitle:"Collections", thisMonth:"This month", thisYear:"This year", allTime:"All time",
       paymentStatusTitle:"Payment status", myContributions:"My contributions", noContributionsYet:"No contributions recorded yet.",
-      filterAll:"All houses", filterPaid:"Paid only", filterUnpaid:"Unpaid only",
+      filterAll:"All houses", filterPaid:"Paid only", filterUnpaid:"Unpaid only", housesCount:"{n} house(s)",
       recordCollection:"Record a collection", member:"Member", amount:"Amount (PKR)", period:"Period", month:"Month", year:"Year", note:"Note (optional)",
       submit:"Save", allCollections:"All collections (admin)", delete:"Delete",
       expensesTitle:"Expenses", recordExpense:"Record an expense", description:"Description", category:"Category", date:"Date",
@@ -193,7 +193,7 @@
       allBloodGroups:"تمام بلڈ گروپس", call:"کال کریں",
       collectionsTitle:"چندہ", thisMonth:"اس مہینے", thisYear:"اس سال", allTime:"کل وقتی",
       paymentStatusTitle:"ادائیگی کی صورتحال", myContributions:"میرا چندہ", noContributionsYet:"ابھی تک کوئی چندہ درج نہیں ہوا۔",
-      filterAll:"تمام گھر", filterPaid:"صرف ادا شدہ", filterUnpaid:"صرف غیر ادا شدہ",
+      filterAll:"تمام گھر", filterPaid:"صرف ادا شدہ", filterUnpaid:"صرف غیر ادا شدہ", housesCount:"{n} گھر",
       recordCollection:"چندہ درج کریں", member:"رکن", amount:"رقم (روپے)", period:"مدت", month:"مہینہ", year:"سال", note:"نوٹ (اختیاری)",
       submit:"محفوظ کریں", allCollections:"تمام چندہ (ایڈمن)", delete:"حذف کریں",
       expensesTitle:"اخراجات", recordExpense:"خرچ درج کریں", description:"تفصیل", category:"قسم", date:"تاریخ",
@@ -212,6 +212,7 @@
     return (STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key;
   }
   function monthName(m){ return (MONTHS[state.lang] || MONTHS.en)[m-1] || m; }
+  function tCount(key, n){ return t(key).replace("{n}", n); }
 
   /* ---------------- State ---------------- */
   var state = {
@@ -562,7 +563,8 @@
       + '  <h3>' + t("paymentStatusTitle") + '</h3>'
       + monthYearSelect("psMonth","psYear")
       + '  <div style="margin-top:10px;">' + paymentStatusFilterSelect() + '</div>'
-      + '  <div id="paymentStatusList" style="margin-top:10px;">' + loadingHtml() + '</div>'
+      + '  <div id="paymentStatusCount" class="muted" style="margin-top:10px;font-size:.9rem;"></div>'
+      + '  <div id="paymentStatusList" style="margin-top:6px;">' + loadingHtml() + '</div>'
       + '</div>'
       + '<div class="card"><h3>' + t("myContributions") + '</h3><div id="myCollectionsList">' + loadingHtml() + '</div></div>'
       + (isAdmin ? allCollectionsListHtml() : '')
@@ -600,12 +602,14 @@
   }
   function renderPaymentStatusList(){
     var box = document.getElementById("paymentStatusList");
+    var countEl = document.getElementById("paymentStatusCount");
     if (!box) return;
     var rows = paymentStatusRows.filter(function(r){
       if (paymentStatusFilter === "paid") return r.paid && !r.is_vacant;
       if (paymentStatusFilter === "unpaid") return !r.paid && !r.is_vacant;
       return true;
     });
+    if (countEl) countEl.textContent = tCount("housesCount", rows.length);
     if (!rows.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
     box.innerHTML = rows.map(function(r){
       var statusBadge = r.is_vacant
