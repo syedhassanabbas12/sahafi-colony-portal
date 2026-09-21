@@ -178,6 +178,19 @@ begin
 end;
 $$;
 
+-- House numbers are free text ("7", "90(A)", ...), so a plain text ORDER BY
+-- sorts "E-100" before "E-2". This pulls out the leading digit run to sort
+-- on numerically, falling back to the full string for houses sharing a
+-- number (e.g. "90" before "90(A)").
+create or replace function public._house_num_key(p_house_number text)
+returns int
+language sql
+immutable
+set search_path = public, extensions
+as $$
+  select nullif(regexp_replace(p_house_number, '\D.*$', ''), '')::int
+$$;
+
 create or replace function public._require_admin(p_token text)
 returns public.users
 language plpgsql
@@ -491,7 +504,7 @@ begin
     )
     from public.users
     where status = 'approved'
-    order by block, house_number;
+    order by block, public._house_num_key(house_number), house_number;
 end;
 $$;
 
@@ -542,7 +555,7 @@ begin
       select 1 from public.users u
       where u.status = 'approved' and u.block = r.block and u.house_number = r.house_number
     )
-    order by r.block, r.house_number;
+    order by r.block, public._house_num_key(r.house_number), r.house_number;
 end;
 $$;
 
@@ -628,7 +641,7 @@ begin
         or coalesce(u.name, r.name) ilike '%' || p_search || '%'
         or coalesce(u.house_number, r.house_number) ilike '%' || p_search || '%'
       )
-    order by coalesce(u.block, r.block), coalesce(u.house_number, r.house_number);
+    order by coalesce(u.block, r.block), public._house_num_key(coalesce(u.house_number, r.house_number)), coalesce(u.house_number, r.house_number);
 end;
 $$;
 
@@ -718,7 +731,7 @@ begin
     )
     from u
     full outer join r on r.block = u.block and r.house_number = u.house_number
-    order by coalesce(u.block, r.block), coalesce(u.house_number, r.house_number);
+    order by coalesce(u.block, r.block), public._house_num_key(coalesce(u.house_number, r.house_number)), coalesce(u.house_number, r.house_number);
 end;
 $$;
 
