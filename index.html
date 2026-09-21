@@ -159,6 +159,7 @@
       allBloodGroups:"All blood groups", call:"Call",
       collectionsTitle:"Collections", thisMonth:"This month", thisYear:"This year", allTime:"All time",
       paymentStatusTitle:"Payment status", myContributions:"My contributions", noContributionsYet:"No contributions recorded yet.",
+      filterAll:"All houses", filterPaid:"Paid only", filterUnpaid:"Unpaid only",
       recordCollection:"Record a collection", member:"Member", amount:"Amount (PKR)", period:"Period", month:"Month", year:"Year", note:"Note (optional)",
       submit:"Save", allCollections:"All collections (admin)", delete:"Delete",
       expensesTitle:"Expenses", recordExpense:"Record an expense", description:"Description", category:"Category", date:"Date",
@@ -192,6 +193,7 @@
       allBloodGroups:"تمام بلڈ گروپس", call:"کال کریں",
       collectionsTitle:"چندہ", thisMonth:"اس مہینے", thisYear:"اس سال", allTime:"کل وقتی",
       paymentStatusTitle:"ادائیگی کی صورتحال", myContributions:"میرا چندہ", noContributionsYet:"ابھی تک کوئی چندہ درج نہیں ہوا۔",
+      filterAll:"تمام گھر", filterPaid:"صرف ادا شدہ", filterUnpaid:"صرف غیر ادا شدہ",
       recordCollection:"چندہ درج کریں", member:"رکن", amount:"رقم (روپے)", period:"مدت", month:"مہینہ", year:"سال", note:"نوٹ (اختیاری)",
       submit:"محفوظ کریں", allCollections:"تمام چندہ (ایڈمن)", delete:"حذف کریں",
       expensesTitle:"اخراجات", recordExpense:"خرچ درج کریں", description:"تفصیل", category:"قسم", date:"تاریخ",
@@ -531,6 +533,14 @@
 
   /* ---- Collections ---- */
   var collectionsPeriod = (function(){ var now=new Date(); return { month: now.getMonth()+1, year: now.getFullYear() }; })();
+  var paymentStatusFilter = "all";
+  var paymentStatusRows = [];
+  function paymentStatusFilterSelect(){
+    var opts = [
+      ["all", t("filterAll")], ["paid", t("filterPaid")], ["unpaid", t("filterUnpaid")]
+    ].map(function(o){ return '<option value="' + o[0] + '"' + (o[0]===paymentStatusFilter?" selected":"") + '>' + o[1] + '</option>'; }).join("");
+    return '<select id="psFilter">' + opts + '</select>';
+  }
   function monthYearSelect(idM, idY){
     var now = new Date(); var years = [];
     for (var y = now.getFullYear()-2; y <= now.getFullYear()+1; y++) years.push(y);
@@ -550,6 +560,7 @@
       + '<div class="card">'
       + '  <h3>' + t("paymentStatusTitle") + '</h3>'
       + monthYearSelect("psMonth","psYear")
+      + '  <div style="margin-top:10px;">' + paymentStatusFilterSelect() + '</div>'
       + '  <div id="paymentStatusList" style="margin-top:10px;">' + loadingHtml() + '</div>'
       + '</div>'
       + '<div class="card"><h3>' + t("myContributions") + '</h3><div id="myCollectionsList">' + loadingHtml() + '</div></div>'
@@ -565,6 +576,7 @@
 
     document.getElementById("psMonth").addEventListener("change", function(e){ collectionsPeriod.month = +e.target.value; loadPaymentStatus(); });
     document.getElementById("psYear").addEventListener("change", function(e){ collectionsPeriod.year = +e.target.value; loadPaymentStatus(); });
+    document.getElementById("psFilter").addEventListener("change", function(e){ paymentStatusFilter = e.target.value; renderPaymentStatusList(); });
     loadPaymentStatus();
 
     api.listMyCollections().then(function(rows){
@@ -581,14 +593,26 @@
     var box = document.getElementById("paymentStatusList");
     box.innerHTML = loadingHtml();
     api.listPaymentStatus(collectionsPeriod.month, collectionsPeriod.year).then(function(rows){
-      box.innerHTML = rows.map(function(r){
-        var statusBadge = r.is_vacant
-          ? '<span class="badge">' + t("vacant") + '</span>'
-          : '<span class="badge ' + (r.paid?"paid":"unpaid") + '">' + (r.paid ? "✓" : "✕") + '</span>';
-        return '<div class="list-item between"><span>' + houseLabel(r.block, r.house_number) + (r.name ? ' — ' + esc(r.name) : '') + '</span>'
-          + statusBadge + '</div>';
-      }).join("");
+      paymentStatusRows = rows;
+      renderPaymentStatusList();
     }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+  }
+  function renderPaymentStatusList(){
+    var box = document.getElementById("paymentStatusList");
+    if (!box) return;
+    var rows = paymentStatusRows.filter(function(r){
+      if (paymentStatusFilter === "paid") return r.paid && !r.is_vacant;
+      if (paymentStatusFilter === "unpaid") return !r.paid && !r.is_vacant;
+      return true;
+    });
+    if (!rows.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
+    box.innerHTML = rows.map(function(r){
+      var statusBadge = r.is_vacant
+        ? '<span class="badge">' + t("vacant") + '</span>'
+        : '<span class="badge ' + (r.paid?"paid":"unpaid") + '">' + (r.paid ? "✓" : "✕") + '</span>';
+      return '<div class="list-item between"><span>' + houseLabel(r.block, r.house_number) + (r.name ? ' — ' + esc(r.name) : '') + '</span>'
+        + statusBadge + '</div>';
+    }).join("");
   }
   function adminCollectionsHtml(){
     return ''
