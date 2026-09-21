@@ -1,0 +1,64 @@
+name: Backup Supabase data
+
+# Pulls every row straight out of the users, residents, collections, and
+# expenses tables using the service_role key, which bypasses Row Level
+# Security entirely - so this includes pin_hash and every other column the
+# app's own anon-key access never sees directly, not just what residents
+# and admins can see through the app. Committed to the `backups` branch as
+# new timestamped files every run, so nothing is ever overwritten.
+#
+# One-time setup this workflow needs: a repo secret named
+# SUPABASE_SERVICE_ROLE_KEY, set under Settings -> Secrets and variables ->
+# Actions. Get the value from the Supabase dashboard -> Project Settings ->
+# API -> service_role key. Never put that key anywhere else - not in
+# config.js, not in any committed file, only here as an encrypted secret.
+# sessions and login_attempts aren't backed up - they're transient auth
+# state, not community data, and regenerate on their own.
+
+on:
+  schedule:
+    - cron: '11 2 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the backups branch
+        uses: actions/checkout@v4
+        with:
+          ref: backups
+
+      - name: Snapshot users, residents, collections, expenses
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::error::SUPABASE_SERVICE_ROLE_KEY secret is not set - see this file's header comment."
+            exit 1
+          fi
+          base="https://grpqzxuzymlouishhnlr.supabase.co/rest/v1"
+          stamp="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+          mkdir -p backups
+
+          for table in users residents collections expenses; do
+            out="backups/${table}-${stamp}.json"
+            curl -sS --fail "${base}/${table}?select=*&order=created_at.asc" \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -o "$out"
+            rows=$(python3 -c "import json; print(len(json.load(open('$out'))))")
+            echo "Backed up $rows row(s) from $table to $out"
+          done
+
+      - name: Commit and push the snapshot
+        run: |
+          git config user.name "sahafi-colony-backup-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backups/
+          git diff --cached --quiet && echo "Nothing changed, skipping commit." && exit 0
+          git commit -m "Automated backup $(date -u +%Y-%m-%d)"
+          git push origin backups

@@ -77,12 +77,12 @@ build. All three are now resolved with the project owner:
   Block Admins, but making someone else Super Admin is still a manual SQL
   step (`update public.users set is_super_admin = true where phone = '...'`)
   since it's rare and deliberately not exposed as a button.
-- **Past Excel records: migrate them**, don't start fresh. This needs the
-  actual Excel file before it can happen — once it's shared, a one-time
-  import script can backfill `collections` and `expenses` from it directly
-  into Supabase (matching each row to a `member_id`/house number, or
-  flagging rows that don't match an existing resident for manual review).
-  Not built yet — pending the file.
+- **Past Excel records: migrate them**, don't start fresh. Done —
+  `migration_seed.sql` imports the community's existing records (houses,
+  residents, September 2026 collections, and the streetlight expenses
+  already logged) directly into Supabase. See "Data model" below for how
+  collections/expenses ended up keyed to a house rather than an app account,
+  since real contribution history predates anyone signing up.
 - **Phase 3 SMS gateway: a local Pakistani provider**, not Twilio, for
   better in-country deliverability and cost. Noted for when Phase 3 is
   actually built — no action needed now, since Phase 1 has no SMS at all.
@@ -148,9 +148,41 @@ folder with anything (`python3 -m http.server`, `npx serve`, ...).
 ## Data model
 
 See `schema.sql` for the full definitions. Summary: `users` (profile +
-`pin_hash` + approval status + role flags), `sessions` (token-based, since
+`pin_hash` + approval status + role flags + `block`/`house_number`),
+`residents` (directory seed/cross-check data — every known house, whether or
+not it has an app account, admin-managed), `sessions` (token-based, since
 there's no Supabase Auth here), `login_attempts` (rate limiting),
-`collections` (fund contributions), `expenses`.
+`collections` and `expenses` (both keyed to `block`/`house_number`, not to an
+app account, since real contribution history predates any signup — a house's
+dues aren't owned by whichever resident happens to have logged in).
+
+## Backups
+
+Free-tier Supabase projects get **no automatic backups** — this repo doesn't
+rely on the vendor for that. `.github/workflows/backup-supabase.yml` (lives
+on `main`, since scheduled/dispatch workflows only read from the default
+branch) runs daily and on demand, and does its own full dump of the `users`,
+`residents`, `collections`, and `expenses` tables straight from Postgres
+using the `SUPABASE_SERVICE_ROLE_KEY` repo secret — bypassing RLS entirely,
+so every column (including `pin_hash`) is backed up, not just what the app
+itself ever sees. Every run commits new timestamped files to the
+**`backups`** branch (a pure data archive, unrelated to the code branches
+above) and nothing is ever overwritten. `sessions`/`login_attempts` aren't
+backed up — they're transient auth state, not community data.
+
+One-time setup required (not done automatically — no tool here can create
+repo secrets): add a repo secret named `SUPABASE_SERVICE_ROLE_KEY` under
+**Settings → Secrets and variables → Actions**, using the `service_role` key
+from the Supabase dashboard (**Project Settings → API**). That key must
+never appear anywhere else — not in `config.js`, not in any commit, only as
+this one encrypted secret. After adding it, trigger the workflow once by
+hand (**Actions → Backup Supabase data → Run workflow**) to confirm it works
+and get an immediate first snapshot, rather than waiting for the next
+2:11 AM UTC run.
+
+If the workflow's push step fails with a permission error, it's almost
+always **Settings → Actions → General → Workflow permissions** being set to
+read-only — switch it to "Read and write permissions."
 
 ## What's next (Phase 2 / Phase 3)
 
