@@ -1,7 +1,10 @@
 -- Sahafi Colony Portal — database schema (Supabase / Postgres)
 --
--- Run this once in your Supabase project's SQL Editor. Idempotent — safe to
--- re-run after pulling schema changes from this repo.
+-- Run this in your Supabase project's SQL Editor. Idempotent — safe to
+-- re-run after pulling schema changes from this repo, including on a
+-- project that already has an earlier version of this file applied (see
+-- the "Migrations" block after each table for how existing installations
+-- get upgraded in place).
 --
 -- Security model: there is no Supabase Auth here (residents log in with
 -- phone + 4-digit PIN, not email). The anon key is the only key the app
@@ -12,6 +15,16 @@
 -- status) before doing anything. Functions named with a leading underscore
 -- are internal helpers and have their EXECUTE grant explicitly revoked from
 -- anon/authenticated so they can only be called from other functions here.
+--
+-- House model: collections and expenses are anchored to a (block,
+-- house_number) pair, not to an app account. Real contribution history
+-- (from the community's old Excel ledger) predates any app signup, and a
+-- house's dues aren't really "owned" by whichever resident happens to have
+-- an account — they're owned by the house. `residents` is the directory
+-- seed/cross-check table (imported once, editable by admins afterward);
+-- `users` is purely app accounts (phone+PIN login). The two are merged at
+-- read time (list_members, list_payment_status) so the directory and the
+-- payment-status board show every known house, signed up or not.
 
 create extension if not exists pgcrypto;
 
@@ -24,6 +37,7 @@ create table if not exists public.users (
   phone text not null unique,
   pin_hash text not null,
   name text not null,
+  block text not null default 'E',
   house_number text not null,
   occupation text,
   blood_group text check (blood_group is null or blood_group in ('A+','A-','B+','B-','AB+','AB-','O+','O-')),
@@ -37,8 +51,31 @@ create table if not exists public.users (
   approved_by uuid references public.users(id)
 );
 
+-- Migration: upgrade an installation from before `block` existed.
+alter table public.users add column if not exists block text not null default 'E';
+
 create index if not exists users_status_idx on public.users(status);
 create index if not exists users_blood_group_idx on public.users(blood_group);
+create index if not exists users_block_house_idx on public.users(block, house_number);
+
+-- Directory seed/cross-check data: every known house in the block, whether
+-- or not its resident has signed up. Imported once from the community's
+-- Excel records, editable by admins afterward (list_residents /
+-- admin_upsert_resident / admin_delete_resident below).
+create table if not exists public.residents (
+  id uuid primary key default gen_random_uuid(),
+  block text not null default 'E',
+  house_number text not null,
+  name text,
+  occupation text,
+  blood_group text check (blood_group is null or blood_group in ('A+','A-','B+','B-','AB+','AB-','O+','O-')),
+  is_vacant boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (block, house_number)
+);
+
+create index if not exists residents_block_house_idx on public.residents(block, house_number);
 
 create table if not exists public.sessions (
   id uuid primary key default gen_random_uuid(),
@@ -65,16 +102,26 @@ create index if not exists login_attempts_phone_time_idx on public.login_attempt
 
 create table if not exists public.collections (
   id uuid primary key default gen_random_uuid(),
-  member_id uuid not null references public.users(id),
+  block text not null default 'E',
+  house_number text not null,
   amount numeric(12,2) not null check (amount > 0),
   period_month smallint not null check (period_month between 1 and 12),
   period_year smallint not null check (period_year between 2000 and 2100),
   note text,
-  recorded_by uuid not null references public.users(id),
+  recorded_by uuid references public.users(id),
   created_at timestamptz not null default now()
 );
 
-create index if not exists collections_member_idx on public.collections(member_id);
+-- Migration: collections used to be keyed to member_id (an app account).
+-- Real contribution history predates any app account, so collections are
+-- keyed to the house itself instead; recorded_by is nullable because
+-- imported historical rows have no specific admin who "recorded" them.
+alter table public.collections add column if not exists block text not null default 'E';
+alter table public.collections add column if not exists house_number text not null default '';
+alter table public.collections drop column if exists member_id;
+alter table public.collections alter column recorded_by drop not null;
+
+create index if not exists collections_house_idx on public.collections(block, house_number);
 create index if not exists collections_period_idx on public.collections(period_year, period_month);
 
 create table if not exists public.expenses (
@@ -84,14 +131,20 @@ create table if not exists public.expenses (
   amount numeric(12,2) not null check (amount > 0),
   expense_date date not null default current_date,
   receipt_photo_url text,
-  recorded_by uuid not null references public.users(id),
+  note text,
+  recorded_by uuid references public.users(id),
   created_at timestamptz not null default now()
 );
+
+-- Migration: note (e.g. "paid by") added, recorded_by nullable for imports.
+alter table public.expenses add column if not exists note text;
+alter table public.expenses alter column recorded_by drop not null;
 
 create index if not exists expenses_date_idx on public.expenses(expense_date);
 create index if not exists expenses_category_idx on public.expenses(category);
 
 alter table public.users enable row level security;
+alter table public.residents enable row level security;
 alter table public.sessions enable row level security;
 alter table public.login_attempts enable row level security;
 alter table public.collections enable row level security;
@@ -146,11 +199,14 @@ $$;
 -- Auth: signup, login, session, profile
 -- ============================================================================
 
+drop function if exists public.signup(text, text, text, text, text, text);
+
 create or replace function public.signup(
   p_phone text,
   p_name text,
   p_house_number text,
   p_pin text,
+  p_block text default 'E',
   p_occupation text default null,
   p_blood_group text default null
 ) returns json
@@ -171,9 +227,10 @@ begin
     raise exception 'Name and house number are required';
   end if;
 
-  insert into public.users (phone, pin_hash, name, house_number, occupation, blood_group)
+  insert into public.users (phone, pin_hash, name, block, house_number, occupation, blood_group)
   values (
-    trim(p_phone), crypt(p_pin, gen_salt('bf')), trim(p_name), trim(p_house_number),
+    trim(p_phone), crypt(p_pin, gen_salt('bf')), trim(p_name),
+    coalesce(nullif(trim(p_block), ''), 'E'), trim(p_house_number),
     nullif(trim(coalesce(p_occupation, '')), ''), nullif(p_blood_group, '')
   )
   returning id into v_id;
@@ -229,7 +286,7 @@ begin
   return json_build_object(
     'token', v_token,
     'user', json_build_object(
-      'id', v_user.id, 'name', v_user.name, 'house_number', v_user.house_number,
+      'id', v_user.id, 'name', v_user.name, 'block', v_user.block, 'house_number', v_user.house_number,
       'is_admin', v_user.is_admin, 'is_super_admin', v_user.is_super_admin
     )
   );
@@ -257,7 +314,7 @@ begin
   v_user := public._current_user(p_token);
   return json_build_object(
     'id', v_user.id, 'name', v_user.name, 'phone', v_user.phone,
-    'house_number', v_user.house_number, 'occupation', v_user.occupation,
+    'block', v_user.block, 'house_number', v_user.house_number, 'occupation', v_user.occupation,
     'blood_group', v_user.blood_group, 'photo_url', v_user.photo_url,
     'is_admin', v_user.is_admin, 'is_super_admin', v_user.is_super_admin
   );
@@ -287,8 +344,10 @@ begin
 end;
 $$;
 
+drop function if exists public.update_own_profile(text, text, text, text, text, text);
+
 create or replace function public.update_own_profile(
-  p_token text, p_name text, p_house_number text, p_occupation text,
+  p_token text, p_name text, p_house_number text, p_block text, p_occupation text,
   p_blood_group text, p_photo_url text
 ) returns void
 language plpgsql
@@ -302,6 +361,7 @@ begin
   update public.users set
     name = coalesce(nullif(trim(p_name), ''), name),
     house_number = coalesce(nullif(trim(p_house_number), ''), house_number),
+    block = coalesce(nullif(trim(p_block), ''), block),
     occupation = nullif(trim(coalesce(p_occupation, '')), ''),
     blood_group = nullif(p_blood_group, ''),
     photo_url = nullif(p_photo_url, '')
@@ -323,7 +383,7 @@ begin
   perform public._require_admin(p_token);
   return query
     select json_build_object(
-      'id', id, 'phone', phone, 'name', name, 'house_number', house_number,
+      'id', id, 'phone', phone, 'name', name, 'block', block, 'house_number', house_number,
       'occupation', occupation, 'blood_group', blood_group, 'created_at', created_at
     )
     from public.users
@@ -386,8 +446,10 @@ begin
 end;
 $$;
 
+drop function if exists public.admin_update_member(text, uuid, text, text, text, text, text);
+
 create or replace function public.admin_update_member(
-  p_token text, p_target_id uuid, p_name text, p_house_number text,
+  p_token text, p_target_id uuid, p_name text, p_house_number text, p_block text,
   p_occupation text, p_blood_group text, p_photo_url text
 ) returns void
 language plpgsql
@@ -399,6 +461,7 @@ begin
   update public.users set
     name = coalesce(nullif(trim(p_name), ''), name),
     house_number = coalesce(nullif(trim(p_house_number), ''), house_number),
+    block = coalesce(nullif(trim(p_block), ''), block),
     occupation = nullif(trim(coalesce(p_occupation, '')), ''),
     blood_group = nullif(p_blood_group, ''),
     photo_url = nullif(p_photo_url, '')
@@ -406,6 +469,29 @@ begin
   if not found then
     raise exception 'Member not found';
   end if;
+end;
+$$;
+
+-- Approved accounts with their real user id, for the admin Members panel
+-- (reset PIN / promote-demote) — distinct from list_members, the public
+-- merged directory, which has no single row id since a directory entry can
+-- come from residents, users, or both.
+create or replace function public.admin_list_accounts(p_token text)
+returns setof json
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  perform public._require_admin(p_token);
+  return query
+    select json_build_object(
+      'id', id, 'name', name, 'phone', phone, 'block', block, 'house_number', house_number,
+      'occupation', occupation, 'blood_group', blood_group, 'is_admin', is_admin
+    )
+    from public.users
+    where status = 'approved'
+    order by block, house_number;
 end;
 $$;
 
@@ -431,7 +517,78 @@ end;
 $$;
 
 -- ============================================================================
--- Member directory
+-- Resident directory (admin-managed seed data)
+-- ============================================================================
+
+-- Only residents entries with no matching approved app account — once
+-- someone signs up for a house, that house's entry is managed through
+-- admin_update_member instead, so there's exactly one editable record per
+-- house at any time.
+create or replace function public.list_residents(p_token text)
+returns setof json
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  perform public._require_admin(p_token);
+  return query
+    select json_build_object(
+      'block', r.block, 'house_number', r.house_number, 'name', r.name,
+      'occupation', r.occupation, 'blood_group', r.blood_group, 'is_vacant', r.is_vacant
+    )
+    from public.residents r
+    where not exists (
+      select 1 from public.users u
+      where u.status = 'approved' and u.block = r.block and u.house_number = r.house_number
+    )
+    order by r.block, r.house_number;
+end;
+$$;
+
+create or replace function public.admin_upsert_resident(
+  p_token text, p_block text, p_house_number text, p_name text,
+  p_occupation text, p_blood_group text, p_is_vacant boolean default false
+) returns void
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  perform public._require_admin(p_token);
+  if length(trim(coalesce(p_house_number, ''))) = 0 then
+    raise exception 'House number is required';
+  end if;
+  insert into public.residents (block, house_number, name, occupation, blood_group, is_vacant, updated_at)
+  values (
+    coalesce(nullif(trim(p_block), ''), 'E'), trim(p_house_number),
+    nullif(trim(coalesce(p_name, '')), ''), nullif(trim(coalesce(p_occupation, '')), ''),
+    nullif(p_blood_group, ''), coalesce(p_is_vacant, false), now()
+  )
+  on conflict (block, house_number) do update set
+    name = excluded.name, occupation = excluded.occupation,
+    blood_group = excluded.blood_group, is_vacant = excluded.is_vacant, updated_at = now();
+end;
+$$;
+
+create or replace function public.admin_delete_resident(p_token text, p_block text, p_house_number text)
+returns void
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+begin
+  perform public._require_admin(p_token);
+  delete from public.residents where block = p_block and house_number = p_house_number;
+  if not found then
+    raise exception 'Resident entry not found';
+  end if;
+end;
+$$;
+
+-- ============================================================================
+-- Member directory — merges signed-up accounts with imported resident data,
+-- so every known house shows up whether or not it has an app account yet.
 -- ============================================================================
 
 create or replace function public.list_members(p_token text, p_search text default null, p_blood_group text default null)
@@ -443,29 +600,46 @@ as $$
 begin
   perform public._current_user(p_token);
   return query
-    select json_build_object(
-      'id', id, 'name', name, 'house_number', house_number, 'phone', phone,
-      'occupation', occupation, 'blood_group', blood_group, 'photo_url', photo_url,
-      'is_admin', is_admin
+    with u as (
+      select block, house_number, name, phone, occupation, blood_group, is_admin
+      from public.users where status = 'approved'
+    ),
+    r as (
+      select block, house_number, name, occupation, blood_group, is_vacant
+      from public.residents
     )
-    from public.users
-    where status = 'approved'
-      and (p_blood_group is null or p_blood_group = '' or blood_group = p_blood_group)
+    select json_build_object(
+      'block', coalesce(u.block, r.block),
+      'house_number', coalesce(u.house_number, r.house_number),
+      'name', coalesce(u.name, r.name),
+      'phone', u.phone,
+      'occupation', coalesce(u.occupation, r.occupation),
+      'blood_group', coalesce(u.blood_group, r.blood_group),
+      'is_admin', coalesce(u.is_admin, false),
+      'is_vacant', coalesce(r.is_vacant, false),
+      'has_account', (u.house_number is not null)
+    )
+    from u
+    full outer join r on r.block = u.block and r.house_number = u.house_number
+    where
+      (p_blood_group is null or p_blood_group = '' or coalesce(u.blood_group, r.blood_group) = p_blood_group)
       and (
         p_search is null or p_search = ''
-        or name ilike '%' || p_search || '%'
-        or house_number ilike '%' || p_search || '%'
+        or coalesce(u.name, r.name) ilike '%' || p_search || '%'
+        or coalesce(u.house_number, r.house_number) ilike '%' || p_search || '%'
       )
-    order by house_number, name;
+    order by coalesce(u.block, r.block), coalesce(u.house_number, r.house_number);
 end;
 $$;
 
 -- ============================================================================
--- Collections (fund contributions)
+-- Collections (fund contributions) — keyed to (block, house_number)
 -- ============================================================================
 
+drop function if exists public.record_collection(text, uuid, numeric, int, int, text);
+
 create or replace function public.record_collection(
-  p_token text, p_member_id uuid, p_amount numeric,
+  p_token text, p_block text, p_house_number text, p_amount numeric,
   p_period_month int, p_period_year int, p_note text default null
 ) returns void
 language plpgsql
@@ -476,11 +650,14 @@ declare
   v_admin public.users;
 begin
   v_admin := public._require_admin(p_token);
-  if not exists (select 1 from public.users where id = p_member_id and status = 'approved') then
-    raise exception 'Member not found';
+  if length(trim(coalesce(p_house_number, ''))) = 0 then
+    raise exception 'House number is required';
   end if;
-  insert into public.collections (member_id, amount, period_month, period_year, note, recorded_by)
-  values (p_member_id, p_amount, p_period_month, p_period_year, nullif(trim(coalesce(p_note, '')), ''), v_admin.id);
+  insert into public.collections (block, house_number, amount, period_month, period_year, note, recorded_by)
+  values (
+    coalesce(nullif(trim(p_block), ''), 'E'), trim(p_house_number), p_amount,
+    p_period_month, p_period_year, nullif(trim(coalesce(p_note, '')), ''), v_admin.id
+  );
 end;
 $$;
 
@@ -509,8 +686,10 @@ begin
 end;
 $$;
 
--- Paid/unpaid status for every member for a given period — visible to all
--- members, but with no amounts, per the spec's default recommendation.
+-- Paid/unpaid status for every known house for a given period — visible to
+-- all members, but with no amounts, per the spec's default recommendation.
+-- Covers every house from the merged directory, including vacant plots and
+-- houses with no app account yet.
 create or replace function public.list_payment_status(p_token text, p_period_month int, p_period_year int)
 returns setof json
 language plpgsql
@@ -520,17 +699,26 @@ as $$
 begin
   perform public._current_user(p_token);
   return query
+    with u as (
+      select block, house_number, name from public.users where status = 'approved'
+    ),
+    r as (
+      select block, house_number, name, is_vacant from public.residents
+    )
     select json_build_object(
-      'house_number', u.house_number,
-      'name', u.name,
+      'block', coalesce(u.block, r.block),
+      'house_number', coalesce(u.house_number, r.house_number),
+      'name', coalesce(u.name, r.name),
+      'is_vacant', coalesce(r.is_vacant, false),
       'paid', exists(
         select 1 from public.collections c
-        where c.member_id = u.id and c.period_month = p_period_month and c.period_year = p_period_year
+        where c.block = coalesce(u.block, r.block) and c.house_number = coalesce(u.house_number, r.house_number)
+          and c.period_month = p_period_month and c.period_year = p_period_year
       )
     )
-    from public.users u
-    where u.status = 'approved'
-    order by u.house_number;
+    from u
+    full outer join r on r.block = u.block and r.house_number = u.house_number
+    order by coalesce(u.block, r.block), coalesce(u.house_number, r.house_number);
 end;
 $$;
 
@@ -550,7 +738,7 @@ begin
       'period_year', period_year, 'note', note, 'created_at', created_at
     )
     from public.collections
-    where member_id = v_user.id
+    where block = v_user.block and house_number = v_user.house_number
     order by period_year desc, period_month desc;
 end;
 $$;
@@ -565,12 +753,11 @@ begin
   perform public._require_admin(p_token);
   return query
     select json_build_object(
-      'id', c.id, 'member_id', c.member_id, 'member_name', u.name, 'house_number', u.house_number,
+      'id', c.id, 'block', c.block, 'house_number', c.house_number,
       'amount', c.amount, 'period_month', c.period_month, 'period_year', c.period_year,
       'note', c.note, 'created_at', c.created_at
     )
     from public.collections c
-    join public.users u on u.id = c.member_id
     where (p_period_month is null or c.period_month = p_period_month)
       and (p_period_year is null or c.period_year = p_period_year)
     order by c.created_at desc;
@@ -601,9 +788,11 @@ $$;
 -- Expenses
 -- ============================================================================
 
+drop function if exists public.record_expense(text, text, text, numeric, date, text);
+
 create or replace function public.record_expense(
   p_token text, p_description text, p_category text, p_amount numeric,
-  p_date date default current_date, p_receipt_photo_url text default null
+  p_date date default current_date, p_receipt_photo_url text default null, p_note text default null
 ) returns void
 language plpgsql
 security definer
@@ -616,8 +805,11 @@ begin
   if length(trim(coalesce(p_description, ''))) = 0 then
     raise exception 'Description is required';
   end if;
-  insert into public.expenses (description, category, amount, expense_date, receipt_photo_url, recorded_by)
-  values (trim(p_description), coalesce(nullif(trim(p_category), ''), 'misc'), p_amount, p_date, nullif(p_receipt_photo_url, ''), v_admin.id);
+  insert into public.expenses (description, category, amount, expense_date, receipt_photo_url, note, recorded_by)
+  values (
+    trim(p_description), coalesce(nullif(trim(p_category), ''), 'misc'), p_amount, p_date,
+    nullif(p_receipt_photo_url, ''), nullif(trim(coalesce(p_note, '')), ''), v_admin.id
+  );
 end;
 $$;
 
@@ -632,7 +824,7 @@ begin
   return query
     select json_build_object(
       'id', id, 'description', description, 'category', category, 'amount', amount,
-      'date', expense_date, 'receipt_photo_url', receipt_photo_url, 'created_at', created_at
+      'date', expense_date, 'receipt_photo_url', receipt_photo_url, 'note', note, 'created_at', created_at
     )
     from public.expenses
     where (p_category is null or p_category = '' or category = p_category)
@@ -684,10 +876,9 @@ begin
   select coalesce(sum(amount), 0) into v_total_expenses from public.expenses;
 
   select coalesce(json_agg(t), '[]'::json) into v_recent_collections from (
-    select u.house_number, u.name, c.period_month, c.period_year, c.created_at
-    from public.collections c
-    join public.users u on u.id = c.member_id
-    order by c.created_at desc
+    select block, house_number, period_month, period_year, created_at
+    from public.collections
+    order by created_at desc
     limit 5
   ) t;
 
@@ -716,26 +907,30 @@ revoke all on all tables in schema public from anon, authenticated;
 revoke all on all functions in schema public from anon, authenticated;
 
 grant execute on function
-  public.signup(text, text, text, text, text, text),
+  public.signup(text, text, text, text, text, text, text),
   public.login(text, text),
   public.logout(text),
   public.get_current_user(text),
   public.change_own_pin(text, text, text),
-  public.update_own_profile(text, text, text, text, text, text),
+  public.update_own_profile(text, text, text, text, text, text, text),
   public.list_pending_signups(text),
   public.approve_signup(text, uuid),
   public.reject_signup(text, uuid, text),
   public.admin_reset_pin(text, uuid, text),
-  public.admin_update_member(text, uuid, text, text, text, text, text),
+  public.admin_update_member(text, uuid, text, text, text, text, text, text),
   public.set_admin_role(text, uuid, boolean),
+  public.admin_list_accounts(text),
+  public.list_residents(text),
+  public.admin_upsert_resident(text, text, text, text, text, text, boolean),
+  public.admin_delete_resident(text, text, text),
   public.list_members(text, text, text),
-  public.record_collection(text, uuid, numeric, int, int, text),
+  public.record_collection(text, text, text, numeric, int, int, text),
   public.get_collection_totals(text),
   public.list_payment_status(text, int, int),
   public.list_my_collections(text),
   public.list_collections_admin(text, int, int),
   public.super_admin_delete_collection(text, uuid),
-  public.record_expense(text, text, text, numeric, date, text),
+  public.record_expense(text, text, text, numeric, date, text, text),
   public.list_expenses(text, text, date, date),
   public.super_admin_delete_expense(text, uuid),
   public.get_dashboard(text)

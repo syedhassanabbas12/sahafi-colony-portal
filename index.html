@@ -85,7 +85,7 @@
   .msg.success{ background:var(--success-bg); color:var(--success); }
   .msg.warn{ background:var(--warn-bg); color:var(--warn); }
   .muted{ color:var(--muted); }
-  .badge{ display:inline-block; font-size:.75rem; font-weight:700; padding:2px 8px; border-radius:999px; }
+  .badge{ display:inline-block; font-size:.75rem; font-weight:700; padding:2px 8px; border-radius:999px; background:var(--border); color:var(--muted); }
   .badge.paid{ background:var(--success-bg); color:var(--success); }
   .badge.unpaid{ background:var(--danger-bg); color:var(--danger); }
   .badge.admin{ background:var(--warn-bg); color:var(--warn); }
@@ -143,8 +143,10 @@
       notConfigured:"This portal isn't connected to a database yet. See README.md to set up a free Supabase project and fill in config.js.",
       navDashboard:"Home", navDirectory:"Directory", navCollections:"Collections", navExpenses:"Expenses", navAdmin:"Admin", navProfile:"Profile",
       login:"Log in", signup:"Sign up",
-      phone:"Phone number", pin:"4-digit PIN", pinConfirm:"Confirm PIN", name:"Full name", houseNumber:"House number",
-      occupation:"Occupation (optional)", bloodGroup:"Blood group (optional)", selectOption:"Select…",
+      phone:"Phone number", pin:"4-digit PIN", pinConfirm:"Confirm PIN", name:"Full name", houseNumber:"House number", block:"Block",
+      occupation:"Occupation (optional)", bloodGroup:"Blood group (optional)", selectOption:"Select…", vacant:"Vacant",
+      house:"House", noAccountYet:"no account yet", residentDirectory:"Resident directory (not yet signed up)",
+      addUpdateHouse:"Add / update a house", isVacant:"Vacant plot (no resident)",
       loginBtn:"Log in", signupBtn:"Create account",
       signupPendingMsg:"Account created. A block admin needs to approve it before you can log in — this is usually quick.",
       pinsMismatch:"PINs don't match",
@@ -174,8 +176,10 @@
       notConfigured:"یہ پورٹل ابھی ڈیٹا بیس سے منسلک نہیں ہے۔ فری Supabase پراجیکٹ بنانے اور config.js مکمل کرنے کے لیے README.md دیکھیں۔",
       navDashboard:"ہوم", navDirectory:"ڈائریکٹری", navCollections:"چندہ", navExpenses:"اخراجات", navAdmin:"ایڈمن", navProfile:"پروفائل",
       login:"لاگ ان", signup:"اکاؤنٹ بنائیں",
-      phone:"فون نمبر", pin:"4 ہندسوں کا پن", pinConfirm:"پن دوبارہ لکھیں", name:"پورا نام", houseNumber:"گھر نمبر",
-      occupation:"پیشہ (اختیاری)", bloodGroup:"بلڈ گروپ (اختیاری)", selectOption:"منتخب کریں…",
+      phone:"فون نمبر", pin:"4 ہندسوں کا پن", pinConfirm:"پن دوبارہ لکھیں", name:"پورا نام", houseNumber:"گھر نمبر", block:"بلاک",
+      occupation:"پیشہ (اختیاری)", bloodGroup:"بلڈ گروپ (اختیاری)", selectOption:"منتخب کریں…", vacant:"خالی پلاٹ",
+      house:"گھر", noAccountYet:"ابھی اکاؤنٹ نہیں", residentDirectory:"رہائشیوں کی فہرست (ابھی سائن اپ نہیں ہوا)",
+      addUpdateHouse:"گھر شامل / اپڈیٹ کریں", isVacant:"خالی پلاٹ (کوئی رہائشی نہیں)",
       loginBtn:"لاگ ان کریں", signupBtn:"اکاؤنٹ بنائیں",
       signupPendingMsg:"اکاؤنٹ بن گیا۔ لاگ ان کرنے سے پہلے بلاک ایڈمن کی منظوری درکار ہے — عام طور پر جلد ہو جاتی ہے۔",
       pinsMismatch:"پن مماثل نہیں ہیں",
@@ -242,6 +246,7 @@
   // numbers, currency amounts) so they don't visually reorder when embedded
   // in Urdu (RTL) text — e.g. "O+" rendering as "+O".
   function bdi(s){ return "<bdi>" + esc(s) + "</bdi>"; }
+  function houseLabel(block, houseNumber){ return bdi((block || "E") + "-" + houseNumber); }
 
   /* ---------------- RPC layer ---------------- */
   function rpc(name, args){
@@ -272,19 +277,23 @@
   }
 
   var api = {
-    signup: function(d){ return rpc("signup", { p_phone:d.phone, p_name:d.name, p_house_number:d.houseNumber, p_pin:d.pin, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null }); },
+    signup: function(d){ return rpc("signup", { p_phone:d.phone, p_name:d.name, p_house_number:d.houseNumber, p_pin:d.pin, p_block:d.block||"E", p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null }); },
     login: function(phone, pin){ return rpc("login", { p_phone:phone, p_pin:pin }); },
     logout: function(){ return rpc("logout", { p_token: state.token }); },
     getCurrentUser: function(){ return rpc("get_current_user", { p_token: state.token }); },
-    updateOwnProfile: function(d){ return rpc("update_own_profile", withToken({ p_name:d.name, p_house_number:d.houseNumber, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_photo_url:d.photoUrl||null })); },
+    updateOwnProfile: function(d){ return rpc("update_own_profile", withToken({ p_name:d.name, p_house_number:d.houseNumber, p_block:d.block||"E", p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_photo_url:d.photoUrl||null })); },
     changeOwnPin: function(oldPin, newPin){ return rpc("change_own_pin", withToken({ p_old_pin:oldPin, p_new_pin:newPin })); },
     listMembers: function(search, bloodGroup){ return rpc("list_members", withToken({ p_search: search||null, p_blood_group: bloodGroup||null })); },
+    adminListAccounts: function(){ return rpc("admin_list_accounts", withToken({})); },
+    listResidents: function(){ return rpc("list_residents", withToken({})); },
+    adminUpsertResident: function(d){ return rpc("admin_upsert_resident", withToken({ p_block:d.block||"E", p_house_number:d.houseNumber, p_name:d.name||null, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_is_vacant:!!d.isVacant })); },
+    adminDeleteResident: function(block, houseNumber){ return rpc("admin_delete_resident", withToken({ p_block:block, p_house_number:houseNumber })); },
     getDashboard: function(){ return rpc("get_dashboard", withToken({})); },
     getCollectionTotals: function(){ return rpc("get_collection_totals", withToken({})); },
     listPaymentStatus: function(m,y){ return rpc("list_payment_status", withToken({ p_period_month:m, p_period_year:y })); },
     listMyCollections: function(){ return rpc("list_my_collections", withToken({})); },
     listCollectionsAdmin: function(m,y){ return rpc("list_collections_admin", withToken({ p_period_month:m||null, p_period_year:y||null })); },
-    recordCollection: function(d){ return rpc("record_collection", withToken({ p_member_id:d.memberId, p_amount:d.amount, p_period_month:d.month, p_period_year:d.year, p_note:d.note||null })); },
+    recordCollection: function(d){ return rpc("record_collection", withToken({ p_block:d.block||"E", p_house_number:d.houseNumber, p_amount:d.amount, p_period_month:d.month, p_period_year:d.year, p_note:d.note||null })); },
     deleteCollection: function(id){ return rpc("super_admin_delete_collection", withToken({ p_id:id })); },
     listExpenses: function(category){ return rpc("list_expenses", withToken({ p_category:category||null, p_from:null, p_to:null })); },
     recordExpense: function(d){ return rpc("record_expense", withToken({ p_description:d.description, p_category:d.category, p_amount:d.amount, p_date:d.date, p_receipt_photo_url:d.receiptUrl||null })); },
@@ -293,7 +302,7 @@
     approveSignup: function(id){ return rpc("approve_signup", withToken({ p_target_id:id })); },
     rejectSignup: function(id, reason){ return rpc("reject_signup", withToken({ p_target_id:id, p_reason:reason||null })); },
     adminResetPin: function(id, newPin){ return rpc("admin_reset_pin", withToken({ p_target_id:id, p_new_pin:newPin })); },
-    adminUpdateMember: function(d){ return rpc("admin_update_member", withToken({ p_target_id:d.id, p_name:d.name, p_house_number:d.houseNumber, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_photo_url:d.photoUrl||null })); },
+    adminUpdateMember: function(d){ return rpc("admin_update_member", withToken({ p_target_id:d.id, p_name:d.name, p_house_number:d.houseNumber, p_block:d.block||"E", p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_photo_url:d.photoUrl||null })); },
     setAdminRole: function(id, isAdmin){ return rpc("set_admin_role", withToken({ p_target_id:id, p_is_admin:isAdmin })); }
   };
 
@@ -381,7 +390,10 @@
         + '<form id="signupForm" class="card">'
         + '  <label>' + t("name") + '</label><input type="text" name="name" required>'
         + '  <label>' + t("phone") + '</label><input type="tel" name="phone" required autocomplete="tel">'
-        + '  <label>' + t("houseNumber") + '</label><input type="text" name="houseNumber" required>'
+        + '  <div class="row">'
+        + '    <div><label>' + t("block") + '</label>' + blockSelect("block", "E") + '</div>'
+        + '    <div><label>' + t("houseNumber") + '</label><input type="text" name="houseNumber" required></div>'
+        + '  </div>'
         + '  <label>' + t("occupation") + '</label><input type="text" name="occupation">'
         + '  <label>' + t("bloodGroup") + '</label>' + bloodGroupSelect("bloodGroup", "")
         + '  <label>' + t("pin") + '</label><input type="password" name="pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" required>'
@@ -395,6 +407,16 @@
     var groups = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
     var opts = '<option value="">' + t("selectOption") + '</option>' + groups.map(function(g){
       return '<option value="' + g + '"' + (g===value?" selected":"") + '>' + g + '</option>';
+    }).join("");
+    return '<select name="' + name + '">' + opts + '</select>';
+  }
+  // Only "E" exists today, but this is a real <select> (not a hardcoded
+  // value) so a second block can be added here later without touching any
+  // form that uses it.
+  var BLOCKS = ["E"];
+  function blockSelect(name, value){
+    var opts = BLOCKS.map(function(b){
+      return '<option value="' + b + '"' + (b===(value||"E")?" selected":"") + '>' + b + '</option>';
     }).join("");
     return '<select name="' + name + '">' + opts + '</select>';
   }
@@ -425,7 +447,7 @@
     btn.disabled = true;
     api.signup({
       phone: f.phone.value.trim(), name: f.name.value.trim(), houseNumber: f.houseNumber.value.trim(),
-      occupation: f.occupation.value.trim(), bloodGroup: f.bloodGroup.value, pin: f.pin.value.trim()
+      block: f.block.value, occupation: f.occupation.value.trim(), bloodGroup: f.bloodGroup.value, pin: f.pin.value.trim()
     }).then(function(){
       authTab = "login";
       renderAuthForm();
@@ -441,7 +463,7 @@
     setView(loadingHtml());
     api.getDashboard().then(function(d){
       var recentC = (d.recent_collections||[]).map(function(c){
-        return '<div class="list-item between"><span>' + bdi(c.house_number) + ' — ' + esc(c.name) + '</span>'
+        return '<div class="list-item between"><span>' + houseLabel(c.block, c.house_number) + '</span>'
           + '<span class="muted">' + t("paidFor") + ' ' + monthName(c.period_month) + ' ' + c.period_year + '</span></div>';
       }).join("") || '<p class="muted">' + t("noActivityYet") + '</p>';
       var recentE = (d.recent_expenses||[]).map(function(x){
@@ -491,12 +513,16 @@
     api.listMembers(directoryState.search, directoryState.bloodGroup).then(function(members){
       if (!members || !members.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
       box.innerHTML = members.map(function(m){
+        var nameLine = m.is_vacant
+          ? '<em class="muted">' + t("isVacant") + '</em>'
+          : (esc(m.name || t("house") + " " + (m.block||"E") + "-" + m.house_number) + (m.is_admin ? ' <span class="badge admin">' + t("navAdmin") + '</span>' : ''));
         return '<div class="card member-card">'
-          + '  <div><strong>' + esc(m.name) + '</strong>' + (m.is_admin ? ' <span class="badge admin">' + t("navAdmin") + '</span>' : '') + '<br>'
-          + '  <span class="muted">' + bdi(m.house_number) + (m.occupation ? " · " + esc(m.occupation) : "") + '</span><br>'
+          + '  <div><strong>' + nameLine + '</strong><br>'
+          + '  <span class="muted">' + houseLabel(m.block, m.house_number) + (m.occupation ? " · " + esc(m.occupation) : "") + '</span><br>'
           + (m.blood_group ? '<span class="badge paid">' + bdi(m.blood_group) + '</span>' : '')
+          + (!m.has_account ? ' <span class="badge">' + t("noAccountYet") + '</span>' : '')
           + '  </div>'
-          + '  <a class="btn small secondary" href="tel:' + esc(m.phone) + '">' + t("call") + '</a>'
+          + (m.phone ? '<a class="btn small secondary" href="tel:' + esc(m.phone) + '">' + t("call") + '</a>' : '')
           + '</div>';
       }).join("");
     }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
@@ -556,8 +582,11 @@
     box.innerHTML = loadingHtml();
     api.listPaymentStatus(collectionsPeriod.month, collectionsPeriod.year).then(function(rows){
       box.innerHTML = rows.map(function(r){
-        return '<div class="list-item between"><span>' + bdi(r.house_number) + ' — ' + esc(r.name) + '</span>'
-          + '<span class="badge ' + (r.paid?"paid":"unpaid") + '">' + (r.paid ? "✓" : "✕") + '</span></div>';
+        var statusBadge = r.is_vacant
+          ? '<span class="badge">' + t("vacant") + '</span>'
+          : '<span class="badge ' + (r.paid?"paid":"unpaid") + '">' + (r.paid ? "✓" : "✕") + '</span>';
+        return '<div class="list-item between"><span>' + houseLabel(r.block, r.house_number) + (r.name ? ' — ' + esc(r.name) : '') + '</span>'
+          + statusBadge + '</div>';
       }).join("");
     }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
   }
@@ -566,7 +595,7 @@
       + '<div class="card">'
       + '  <h3>' + t("recordCollection") + '</h3>'
       + '  <form id="recordCollectionForm">'
-      + '    <label>' + t("member") + '</label><select name="memberId" id="collMemberSelect" required><option value="">' + t("selectOption") + '</option></select>'
+      + '    <label>' + t("house") + '</label><select name="houseKey" id="collHouseSelect" required><option value="">' + t("selectOption") + '</option></select>'
       + '    <label>' + t("amount") + '</label><input type="number" name="amount" min="1" step="1" required>'
       + '    <label>' + t("period") + '</label>' + monthYearSelect("recMonth","recYear")
       + '    <label>' + t("note") + '</label><input type="text" name="note">'
@@ -577,18 +606,22 @@
       + '<div class="card"><h3>' + t("allCollections") + '</h3><div id="allCollectionsList">' + loadingHtml() + '</div></div>';
   }
   function bindAdminCollections(){
-    api.listMembers("", "").then(function(members){
-      var sel = document.getElementById("collMemberSelect");
+    api.listMembers("", "").then(function(houses){
+      var sel = document.getElementById("collHouseSelect");
       if (!sel) return;
-      sel.innerHTML += members.map(function(m){ return '<option value="' + m.id + '">' + esc(m.house_number) + ' — ' + esc(m.name) + '</option>'; }).join("");
+      sel.innerHTML += houses.map(function(h){
+        var label = (h.block||"E") + "-" + h.house_number + (h.name ? " — " + h.name : h.is_vacant ? " (" + t("vacant") + ")" : "");
+        return '<option value="' + esc((h.block||"E") + "|" + h.house_number) + '">' + esc(label) + '</option>';
+      }).join("");
     }).catch(function(){});
     var form = document.getElementById("recordCollectionForm");
     if (form) form.addEventListener("submit", function(e){
       e.preventDefault();
       var f = e.target, btn = f.querySelector("button");
+      var parts = f.houseKey.value.split("|");
       btn.disabled = true;
       api.recordCollection({
-        memberId: f.memberId.value, amount: +f.amount.value,
+        block: parts[0], houseNumber: parts[1], amount: +f.amount.value,
         month: +document.getElementById("recMonth").value, year: +document.getElementById("recYear").value,
         note: f.note.value.trim()
       }).then(function(){
@@ -606,7 +639,7 @@
       if (!rows.length) { listBox.innerHTML = '<p class="muted">' + t("noContributionsYet") + '</p>'; return; }
       listBox.innerHTML = rows.map(function(r){
         return '<div class="list-item between">'
-          + '<span>' + bdi(r.house_number) + ' — ' + esc(r.member_name) + ' (' + monthName(r.period_month) + ' ' + r.period_year + ')</span>'
+          + '<span>' + houseLabel(r.block, r.house_number) + ' (' + monthName(r.period_month) + ' ' + r.period_year + ')</span>'
           + '<span class="amount">' + money(r.amount) + (state.user.is_super_admin ? ' <button class="btn small danger" data-del-coll="' + r.id + '">' + t("delete") + '</button>' : '') + '</span>'
           + '</div>';
       }).join("");
@@ -699,9 +732,61 @@
       + '<h1>' + t("adminTitle") + '</h1>'
       + '<div class="card"><h3>' + t("pendingSignups") + '</h3><div id="pendingList">' + loadingHtml() + '</div></div>'
       + '<div class="card"><h3>' + t("members") + '</h3><div id="adminMembersList">' + loadingHtml() + '</div></div>'
+      + '<div class="card">'
+      + '  <h3>' + t("addUpdateHouse") + '</h3>'
+      + '  <form id="residentForm">'
+      + '    <div class="row">'
+      + '      <div><label>' + t("block") + '</label>' + blockSelect("block", "E") + '</div>'
+      + '      <div><label>' + t("houseNumber") + '</label><input type="text" name="houseNumber" required></div>'
+      + '    </div>'
+      + '    <label>' + t("name") + '</label><input type="text" name="name">'
+      + '    <label>' + t("occupation") + '</label><input type="text" name="occupation">'
+      + '    <label>' + t("bloodGroup") + '</label>' + bloodGroupSelect("bloodGroup", "")
+      + '    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;"><input type="checkbox" name="isVacant" style="width:auto;min-height:auto;"> ' + t("isVacant") + '</label>'
+      + '    <div id="residentMsg"></div>'
+      + '    <button class="btn" type="submit">' + t("submit") + '</button>'
+      + '  </form>'
+      + '</div>'
+      + '<div class="card"><h3>' + t("residentDirectory") + '</h3><div id="residentsList">' + loadingHtml() + '</div></div>'
     );
     loadPendingSignups();
     loadAdminMembers();
+    loadResidents();
+    document.getElementById("residentForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var f = e.target, btn = f.querySelector("button");
+      btn.disabled = true;
+      api.adminUpsertResident({
+        block: f.block.value, houseNumber: f.houseNumber.value.trim(), name: f.name.value.trim(),
+        occupation: f.occupation.value.trim(), bloodGroup: f.bloodGroup.value, isVacant: f.isVacant.checked
+      }).then(function(){
+        f.reset();
+        btn.disabled = false;
+        toast(t("submit") + " ✓");
+        loadResidents();
+      }).catch(function(err){
+        btn.disabled = false;
+        document.getElementById("residentMsg").innerHTML = '<div class="msg error">' + esc(err.message) + '</div>';
+      });
+    });
+  }
+  function loadResidents(){
+    var box = document.getElementById("residentsList");
+    api.listResidents().then(function(rows){
+      if (!rows.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
+      box.innerHTML = rows.map(function(r){
+        return '<div class="list-item between">'
+          + '<span>' + houseLabel(r.block, r.house_number) + (r.name ? ' — ' + esc(r.name) : '') + (r.is_vacant ? ' <span class="badge">' + t("vacant") + '</span>' : '') + '</span>'
+          + '<button class="btn small danger" data-del-res="' + esc(r.block) + '|' + esc(r.house_number) + '">' + t("delete") + '</button>'
+          + '</div>';
+      }).join("");
+      box.querySelectorAll("[data-del-res]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var parts = btn.getAttribute("data-del-res").split("|");
+          api.adminDeleteResident(parts[0], parts[1]).then(loadResidents).catch(function(err){ toast(err.message); });
+        });
+      });
+    }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
   }
   function loadPendingSignups(){
     var box = document.getElementById("pendingList");
@@ -709,7 +794,7 @@
       if (!rows.length) { box.innerHTML = '<p class="muted">' + t("noPendingSignups") + '</p>'; return; }
       box.innerHTML = rows.map(function(r){
         return '<div class="card">'
-          + '<strong>' + esc(r.name) + '</strong> · ' + bdi(r.house_number) + '<br>'
+          + '<strong>' + esc(r.name) + '</strong> · ' + houseLabel(r.block, r.house_number) + '<br>'
           + '<span class="muted">' + bdi(r.phone) + (r.occupation ? " · " + esc(r.occupation) : "") + (r.blood_group ? " · " + bdi(r.blood_group) : "") + '</span>'
           + '<div class="row" style="margin-top:10px;">'
           + '  <button class="btn small" data-approve="' + r.id + '">' + t("approve") + '</button>'
@@ -731,14 +816,14 @@
   }
   function loadAdminMembers(){
     var box = document.getElementById("adminMembersList");
-    api.listMembers("", "").then(function(rows){
+    api.adminListAccounts().then(function(rows){
       box.innerHTML = rows.map(function(m){
         var toggleBtn = state.user.is_super_admin
           ? '<button class="btn small secondary" data-toggle-admin="' + m.id + '" data-is-admin="' + (m.is_admin?"1":"0") + '">' + (m.is_admin ? t("removeAdmin") : t("makeAdmin")) + '</button>'
           : '';
         return '<div class="card">'
           + '<div class="between"><strong>' + esc(m.name) + '</strong>' + (m.is_admin ? '<span class="badge admin">' + t("navAdmin") + '</span>' : '') + '</div>'
-          + '<span class="muted">' + bdi(m.house_number) + ' · ' + bdi(m.phone) + '</span>'
+          + '<span class="muted">' + houseLabel(m.block, m.house_number) + ' · ' + bdi(m.phone) + '</span>'
           + '<div class="row" style="margin-top:10px;">'
           + '  <button class="btn small secondary" data-reset-pin="' + m.id + '">' + t("resetPin") + '</button>'
           + toggleBtn
@@ -767,7 +852,10 @@
       + '<h1>' + t("profileTitle") + '</h1>'
       + '<form id="profileForm" class="card">'
       + '  <label>' + t("name") + '</label><input type="text" name="name" value="' + esc(u.name) + '" required>'
-      + '  <label>' + t("houseNumber") + '</label><input type="text" name="houseNumber" value="' + esc(u.house_number) + '" required>'
+      + '  <div class="row">'
+      + '    <div><label>' + t("block") + '</label>' + blockSelect("block", u.block||"E") + '</div>'
+      + '    <div><label>' + t("houseNumber") + '</label><input type="text" name="houseNumber" value="' + esc(u.house_number) + '" required></div>'
+      + '  </div>'
       + '  <label>' + t("occupation") + '</label><input type="text" name="occupation" value="' + esc(u.occupation||"") + '">'
       + '  <label>' + t("bloodGroup") + '</label>' + bloodGroupSelect("bloodGroup", u.blood_group||"")
       + '  <div id="profileMsg"></div>'
@@ -786,7 +874,7 @@
       e.preventDefault();
       var f = e.target, btn = f.querySelector("button");
       btn.disabled = true;
-      api.updateOwnProfile({ name:f.name.value.trim(), houseNumber:f.houseNumber.value.trim(), occupation:f.occupation.value.trim(), bloodGroup:f.bloodGroup.value }).then(function(){
+      api.updateOwnProfile({ name:f.name.value.trim(), houseNumber:f.houseNumber.value.trim(), block:f.block.value, occupation:f.occupation.value.trim(), bloodGroup:f.bloodGroup.value }).then(function(){
         return api.getCurrentUser();
       }).then(function(user){
         state.user = user; btn.disabled = false;
