@@ -494,6 +494,7 @@
       + '  <input type="text" id="dirSearch" placeholder="' + t("searchPlaceholder") + '" value="' + esc(directoryState.search) + '">'
       + '  <div style="margin-top:10px;">' + bloodGroupFilterSelect() + '</div>'
       + '</div>'
+      + '<div id="dirCount" class="muted" style="margin-bottom:8px;font-size:.9rem;"></div>'
       + '<div id="dirList">' + loadingHtml() + '</div>'
     );
     document.getElementById("dirSearch").addEventListener("input", debounce(function(e){
@@ -513,7 +514,9 @@
   }
   function loadDirectoryList(){
     var box = document.getElementById("dirList");
+    var countEl = document.getElementById("dirCount");
     api.listMembers(directoryState.search, directoryState.bloodGroup).then(function(members){
+      if (countEl) countEl.textContent = tCount("housesCount", members ? members.length : 0);
       if (!members || !members.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
       box.innerHTML = members.map(function(m){
         var nameLine = m.is_vacant

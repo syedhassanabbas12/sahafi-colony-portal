@@ -191,6 +191,27 @@ as $$
   select nullif(regexp_replace(p_house_number, '\D.*$', ''), '')::int
 $$;
 
+-- "+923001234567", "0092 300 1234567" and "03001234567" are the same real
+-- number typed three different ways — without this, each variant creates a
+-- separate account for the same house. Canonical form is local Pakistani
+-- mobile: 0 + 10 digits.
+create or replace function public._normalize_phone(p_phone text)
+returns text
+language plpgsql
+immutable
+set search_path = public, extensions
+as $$
+declare
+  digits text;
+begin
+  digits := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
+  if digits ~ '^0092\d{10}$' or digits ~ '^92\d{10}$' then
+    return '0' || right(digits, 10);
+  end if;
+  return digits;
+end;
+$$;
+
 create or replace function public._require_admin(p_token text)
 returns public.users
 language plpgsql
@@ -233,8 +254,8 @@ begin
   if p_pin !~ '^[0-9]{4}$' then
     raise exception 'PIN must be exactly 4 digits';
   end if;
-  if length(trim(coalesce(p_phone, ''))) < 7 then
-    raise exception 'Enter a valid phone number';
+  if public._normalize_phone(p_phone) !~ '^0[0-9]{10}$' then
+    raise exception 'Enter a valid Pakistani mobile number (e.g. 03001234567)';
   end if;
   if length(trim(coalesce(p_name, ''))) = 0 or length(trim(coalesce(p_house_number, ''))) = 0 then
     raise exception 'Name and house number are required';
@@ -242,7 +263,7 @@ begin
 
   insert into public.users (phone, pin_hash, name, block, house_number, occupation, blood_group)
   values (
-    trim(p_phone), crypt(p_pin, gen_salt('bf')), trim(p_name),
+    public._normalize_phone(p_phone), crypt(p_pin, gen_salt('bf')), trim(p_name),
     coalesce(nullif(trim(p_block), ''), 'E'), trim(p_house_number),
     nullif(trim(coalesce(p_occupation, '')), ''), nullif(p_blood_group, '')
   )
@@ -268,7 +289,7 @@ declare
 begin
   select count(*) into v_recent_failures
   from public.login_attempts
-  where phone = trim(p_phone)
+  where phone = public._normalize_phone(p_phone)
     and succeeded = false
     and attempted_at > now() - interval '15 minutes';
 
@@ -276,10 +297,10 @@ begin
     raise exception 'Too many failed attempts. Try again in 15 minutes.';
   end if;
 
-  select * into v_user from public.users where phone = trim(p_phone);
+  select * into v_user from public.users where phone = public._normalize_phone(p_phone);
 
   if v_user.id is null or v_user.pin_hash <> crypt(p_pin, v_user.pin_hash) then
-    insert into public.login_attempts (phone, succeeded) values (trim(p_phone), false);
+    insert into public.login_attempts (phone, succeeded) values (public._normalize_phone(p_phone), false);
     raise exception 'Incorrect phone number or PIN';
   end if;
 
@@ -290,7 +311,7 @@ begin
     raise exception 'This account was not approved. Contact your block admin.';
   end if;
 
-  insert into public.login_attempts (phone, succeeded) values (trim(p_phone), true);
+  insert into public.login_attempts (phone, succeeded) values (public._normalize_phone(p_phone), true);
 
   v_token := encode(gen_random_bytes(32), 'hex');
   insert into public.sessions (user_id, token, expires_at)
