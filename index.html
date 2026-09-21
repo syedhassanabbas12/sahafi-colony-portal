@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sahafi Colony Portal</title>
+<meta name="description" content="Transparent community welfare fund management for Sahafi Colony residents — collections, expenses, and the live balance, visible to everyone.">
+<meta name="theme-color" content="#0b6e4f">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<script src="config.js"></script>
+<style>
+  :root{
+    --bg:#f6f6f2; --surface:#ffffff; --text:#161616; --muted:#5b5b55;
+    --primary:#0b6e4f; --primary-dark:#084a35; --primary-contrast:#ffffff;
+    --border:#dcdcd4; --danger:#a3221a; --danger-bg:#fbe9e7;
+    --success:#0b6e4f; --success-bg:#e6f2ec; --warn-bg:#fff6e0; --warn:#7a5b00;
+    --radius:12px; --nav-h:64px; --top-h:56px; --max-w:640px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Nastaliq Urdu","Noto Sans Arabic",sans-serif;
+    font-size:17px; line-height:1.45; -webkit-text-size-adjust:100%;
+  }
+  html[dir="rtl"] body{ font-size:19px; }
+  h1,h2,h3{ margin:0 0 .5em; line-height:1.25; }
+  h1{ font-size:1.4rem; } h2{ font-size:1.2rem; } h3{ font-size:1.05rem; }
+  p{ margin:0 0 .75em; }
+  button, input, select, textarea{ font:inherit; color:inherit; }
+  a{ color:var(--primary); }
+  #app{ max-width:var(--max-w); margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
+  #topbar{
+    position:sticky; top:0; z-index:20; height:var(--top-h); display:flex; align-items:center;
+    justify-content:space-between; gap:8px; padding:0 14px; background:var(--primary); color:var(--primary-contrast);
+  }
+  #topbar .brand{ font-weight:700; font-size:1.05rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #topbar .topbar-actions{ display:flex; gap:8px; align-items:center; }
+  .icon-btn{
+    background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.35); color:#fff;
+    border-radius:8px; min-height:40px; padding:6px 10px; cursor:pointer;
+  }
+  .icon-btn:active{ background:rgba(255,255,255,.3); }
+  #view{ flex:1; padding:16px 14px calc(var(--nav-h) + 24px); }
+  #bottomnav{
+    position:fixed; left:0; right:0; bottom:0; z-index:20; height:var(--nav-h);
+    display:flex; background:var(--surface); border-top:1px solid var(--border);
+    max-width:var(--max-w); margin:0 auto;
+  }
+  #bottomnav button{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:2px; background:none; border:none; color:var(--muted); font-size:.72rem; cursor:pointer; padding:4px 2px;
+  }
+  #bottomnav button .navicon{ font-size:1.3rem; line-height:1; }
+  #bottomnav button.active{ color:var(--primary); font-weight:700; }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; margin-bottom:14px; }
+  .balance-card{ text-align:center; padding:24px 16px; }
+  .balance-amount{ font-size:2.4rem; font-weight:800; color:var(--primary-dark); margin:6px 0; }
+  .balance-sub{ display:flex; justify-content:center; gap:24px; margin-top:10px; color:var(--muted); font-size:.95rem; }
+  .row{ display:flex; gap:10px; }
+  .row > *{ flex:1; }
+  label{ display:block; font-weight:600; margin:12px 0 4px; }
+  input[type=text], input[type=tel], input[type=password], input[type=number], input[type=date], input[type=url], select, textarea{
+    width:100%; min-height:48px; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px;
+    background:#fff; font-size:1rem;
+  }
+  textarea{ min-height:70px; }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    min-height:48px; padding:10px 18px; border-radius:10px; border:1.5px solid var(--primary);
+    background:var(--primary); color:#fff; font-weight:700; cursor:pointer; width:100%; margin-top:14px;
+  }
+  .btn:active{ background:var(--primary-dark); }
+  .btn.secondary{ background:#fff; color:var(--primary); }
+  .btn.danger{ background:var(--danger); border-color:var(--danger); }
+  .btn.small{ width:auto; min-height:40px; padding:8px 14px; margin-top:0; font-size:.9rem; }
+  .btn[disabled]{ opacity:.55; cursor:default; }
+  .tabs{ display:flex; gap:8px; margin-bottom:14px; }
+  .tabs button{ flex:1; min-height:46px; border-radius:10px; border:1.5px solid var(--border); background:#fff; font-weight:700; cursor:pointer; }
+  .tabs button.active{ background:var(--primary); border-color:var(--primary); color:#fff; }
+  .msg{ padding:10px 12px; border-radius:10px; margin:10px 0; font-size:.95rem; }
+  .msg.error{ background:var(--danger-bg); color:var(--danger); }
+  .msg.success{ background:var(--success-bg); color:var(--success); }
+  .msg.warn{ background:var(--warn-bg); color:var(--warn); }
+  .muted{ color:var(--muted); }
+  .badge{ display:inline-block; font-size:.75rem; font-weight:700; padding:2px 8px; border-radius:999px; }
+  .badge.paid{ background:var(--success-bg); color:var(--success); }
+  .badge.unpaid{ background:var(--danger-bg); color:var(--danger); }
+  .badge.admin{ background:var(--warn-bg); color:var(--warn); }
+  .member-card{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .member-card + .member-card{ margin-top:10px; }
+  .list-item{ padding:10px 0; border-bottom:1px solid var(--border); }
+  .list-item:last-child{ border-bottom:none; }
+  .list-item .amount{ font-weight:700; }
+  .between{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .center{ text-align:center; }
+  .spinner{ display:inline-block; width:20px; height:20px; border:3px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin 0.8s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .toast{
+    position:fixed; left:14px; right:14px; bottom:calc(var(--nav-h) + 14px); z-index:40; max-width:var(--max-w);
+    margin:0 auto; background:var(--text); color:#fff; padding:12px 16px; border-radius:10px; font-size:.95rem;
+  }
+  .hidden{ display:none !important; }
+  fieldset{ border:1.5px solid var(--border); border-radius:10px; margin:14px 0 0; padding:12px; }
+  legend{ font-weight:700; padding:0 6px; }
+  html[dir="rtl"] #app, html[dir="rtl"] .row, html[dir="rtl"] .between, html[dir="rtl"] .balance-sub{ direction:rtl; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand" id="brand">Sahafi Colony Portal</div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="langBtn" type="button">اردو</button>
+    </div>
+  </header>
+  <main id="view"></main>
+  <nav id="bottomnav" class="hidden"></nav>
+</div>
+<div id="toast" class="toast hidden"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- Config / Supabase check ---------------- */
+  var CFG = window.PORTAL_CONFIG || {};
+  var SUPABASE_URL = (CFG.SUPABASE_URL || "").replace(/\/$/, "");
+  var SUPABASE_ANON_KEY = CFG.SUPABASE_ANON_KEY || "";
+  var CONFIGURED = !!SUPABASE_URL && !!SUPABASE_ANON_KEY && !/YOUR-PROJECT|YOUR-ANON/.test(SUPABASE_URL + SUPABASE_ANON_KEY);
+
+  /* ---------------- i18n ---------------- */
+  var MONTHS = {
+    en: ["January","February","March","April","May","June","July","August","September","October","November","December"],
+    ur: ["جنوری","فروری","مارچ","اپریل","مئی","جون","جولائی","اگست","ستمبر","اکتوبر","نومبر","دسمبر"]
+  };
+  var STRINGS = {
+    en: {
+      appName:"Sahafi Colony Portal",
+      notConfigured:"This portal isn't connected to a database yet. See README.md to set up a free Supabase project and fill in config.js.",
+      navDashboard:"Home", navDirectory:"Directory", navCollections:"Collections", navExpenses:"Expenses", navAdmin:"Admin", navProfile:"Profile",
+      login:"Log in", signup:"Sign up",
+      phone:"Phone number", pin:"4-digit PIN", pinConfirm:"Confirm PIN", name:"Full name", houseNumber:"House number",
+      occupation:"Occupation (optional)", bloodGroup:"Blood group (optional)", selectOption:"Select…",
+      loginBtn:"Log in", signupBtn:"Create account",
+      signupPendingMsg:"Account created. A block admin needs to approve it before you can log in — this is usually quick.",
+      pinsMismatch:"PINs don't match",
+      logout:"Log out",
+      balance:"Current balance", totalCollected:"Total collected", totalSpent:"Total spent",
+      recentActivity:"Recent activity", recentCollections:"Recent collections", recentExpenses:"Recent expenses",
+      noActivityYet:"Nothing recorded yet.",
+      paidFor:"paid for",
+      directoryTitle:"Member directory", searchPlaceholder:"Search by name or house number",
+      allBloodGroups:"All blood groups", call:"Call",
+      collectionsTitle:"Collections", thisMonth:"This month", thisYear:"This year", allTime:"All time",
+      paymentStatusTitle:"Payment status", myContributions:"My contributions", noContributionsYet:"No contributions recorded yet.",
+      recordCollection:"Record a collection", member:"Member", amount:"Amount (PKR)", period:"Period", month:"Month", year:"Year", note:"Note (optional)",
+      submit:"Save", allCollections:"All collections (admin)", delete:"Delete",
+      expensesTitle:"Expenses", recordExpense:"Record an expense", description:"Description", category:"Category", date:"Date",
+      receiptUrl:"Receipt photo URL (optional)", noExpensesYet:"No expenses recorded yet.",
+      adminTitle:"Admin", pendingSignups:"Pending signups", noPendingSignups:"No pending signups.",
+      approve:"Approve", reject:"Reject", rejectReason:"Reason (optional)",
+      members:"Members", resetPin:"Reset PIN", edit:"Edit", makeAdmin:"Make admin", removeAdmin:"Remove admin",
+      profileTitle:"My profile", editProfile:"Save changes", changePin:"Change PIN", currentPin:"Current PIN", newPin:"New PIN",
+      cancel:"Cancel", loading:"Loading…", save:"Save", close:"Close",
+      welfareIntro:"Every resident can see exactly how much came in, how much went out, and why.",
+      categoryMisc:"Miscellaneous", categoryStreetlights:"Streetlights", categorySecurity:"Security", categoryTransformer:"Transformer", categoryOther:"Other"
+    },
+    ur: {
+      appName:"صحافی کالونی پورٹل",
+      notConfigured:"یہ پورٹل ابھی ڈیٹا بیس سے منسلک نہیں ہے۔ فری Supabase پراجیکٹ بنانے اور config.js مکمل کرنے کے لیے README.md دیکھیں۔",
+      navDashboard:"ہوم", navDirectory:"ڈائریکٹری", navCollections:"چندہ", navExpenses:"اخراجات", navAdmin:"ایڈمن", navProfile:"پروفائل",
+      login:"لاگ ان", signup:"اکاؤنٹ بنائیں",
+      phone:"فون نمبر", pin:"4 ہندسوں کا پن", pinConfirm:"پن دوبارہ لکھیں", name:"پورا نام", houseNumber:"گھر نمبر",
+      occupation:"پیشہ (اختیاری)", bloodGroup:"بلڈ گروپ (اختیاری)", selectOption:"منتخب کریں…",
+      loginBtn:"لاگ ان کریں", signupBtn:"اکاؤنٹ بنائیں",
+      signupPendingMsg:"اکاؤنٹ بن گیا۔ لاگ ان کرنے سے پہلے بلاک ایڈمن کی منظوری درکار ہے — عام طور پر جلد ہو جاتی ہے۔",
+      pinsMismatch:"پن مماثل نہیں ہیں",
+      logout:"لاگ آؤٹ",
+      balance:"موجودہ بیلنس", totalCollected:"کل جمع شدہ رقم", totalSpent:"کل خرچ شدہ رقم",
+      recentActivity:"حالیہ سرگرمی", recentCollections:"حالیہ چندہ", recentExpenses:"حالیہ اخراجات",
+      noActivityYet:"ابھی تک کچھ درج نہیں ہوا۔",
+      paidFor:"کی ادائیگی",
+      directoryTitle:"رہائشیوں کی ڈائریکٹری", searchPlaceholder:"نام یا گھر نمبر سے تلاش کریں",
+      allBloodGroups:"تمام بلڈ گروپس", call:"کال کریں",
+      collectionsTitle:"چندہ", thisMonth:"اس مہینے", thisYear:"اس سال", allTime:"کل وقتی",
+      paymentStatusTitle:"ادائیگی کی صورتحال", myContributions:"میرا چندہ", noContributionsYet:"ابھی تک کوئی چندہ درج نہیں ہوا۔",
+      recordCollection:"چندہ درج کریں", member:"رکن", amount:"رقم (روپے)", period:"مدت", month:"مہینہ", year:"سال", note:"نوٹ (اختیاری)",
+      submit:"محفوظ کریں", allCollections:"تمام چندہ (ایڈمن)", delete:"حذف کریں",
+      expensesTitle:"اخراجات", recordExpense:"خرچ درج کریں", description:"تفصیل", category:"قسم", date:"تاریخ",
+      receiptUrl:"رسید کی تصویر کا لنک (اختیاری)", noExpensesYet:"ابھی تک کوئی خرچ درج نہیں ہوا۔",
+      adminTitle:"ایڈمن", pendingSignups:"زیرِ التوا درخواستیں", noPendingSignups:"کوئی زیرِ التوا درخواست نہیں۔",
+      approve:"منظور کریں", reject:"مسترد کریں", rejectReason:"وجہ (اختیاری)",
+      members:"اراکین", resetPin:"پن ری سیٹ کریں", edit:"ترمیم", makeAdmin:"ایڈمن بنائیں", removeAdmin:"ایڈمن ہٹائیں",
+      profileTitle:"میری پروفائل", editProfile:"تبدیلیاں محفوظ کریں", changePin:"پن تبدیل کریں", currentPin:"موجودہ پن", newPin:"نیا پن",
+      cancel:"منسوخ", loading:"لوڈ ہو رہا ہے…", save:"محفوظ کریں", close:"بند کریں",
+      welfareIntro:"ہر رہائشی دیکھ سکتا ہے کہ کتنی رقم آئی، کتنی خرچ ہوئی، اور کیوں۔",
+      categoryMisc:"متفرق", categoryStreetlights:"اسٹریٹ لائٹس", categorySecurity:"سیکیورٹی", categoryTransformer:"ٹرانسفارمر", categoryOther:"دیگر"
+    }
+  };
+  function t(key){
+    var lang = state.lang;
+    return (STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key;
+  }
+  function monthName(m){ return (MONTHS[state.lang] || MONTHS.en)[m-1] || m; }
+
+  /* ---------------- State ---------------- */
+  var state = {
+    lang: localStorage.getItem("lh_lang") || "en",
+    token: localStorage.getItem("lh_token") || "",
+    user: null,
+    view: "dashboard",
+    booting: true
+  };
+
+  function setLang(lang){
+    state.lang = lang;
+    localStorage.setItem("lh_lang", lang);
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === "ur" ? "rtl" : "ltr";
+    document.getElementById("langBtn").textContent = lang === "ur" ? "English" : "اردو";
+    document.getElementById("brand").textContent = t("appName");
+    render();
+  }
+
+  function toast(message){
+    var el = document.getElementById("toast");
+    el.textContent = message;
+    el.classList.remove("hidden");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function(){ el.classList.add("hidden"); }, 3200);
+  }
+
+  function money(n){
+    var v = Number(n || 0);
+    return bdi("Rs. " + v.toLocaleString("en-US", { maximumFractionDigits: 0 }));
+  }
+  // Isolates short Latin/numeric tokens (house numbers, blood groups, phone
+  // numbers, currency amounts) so they don't visually reorder when embedded
+  // in Urdu (RTL) text — e.g. "O+" rendering as "+O".
+  function bdi(s){ return "<bdi>" + esc(s) + "</bdi>"; }
+
+  /* ---------------- RPC layer ---------------- */
+  function rpc(name, args){
+    return fetch(SUPABASE_URL + "/rest/v1/rpc/" + name, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(args || {})
+    }).then(function(res){
+      return res.text().then(function(raw){
+        var body = null;
+        if (raw) { try { body = JSON.parse(raw); } catch (e) { body = raw; } }
+        if (!res.ok) {
+          var msg = (body && (body.message || body.msg)) || "Something went wrong. Please try again.";
+          throw new Error(msg);
+        }
+        return body;
+      });
+    });
+  }
+  function withToken(args){
+    var a = Object.assign({}, args || {});
+    a.p_token = state.token;
+    return a;
+  }
+
+  var api = {
+    signup: function(d){ return rpc("signup", { p_phone:d.phone, p_name:d.name, p_house_number:d.houseNumber, p_pin:d.pin, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null }); },
+    login: function(phone, pin){ return rpc("login", { p_phone:phone, p_pin:pin }); },
+    logout: function(){ return rpc("logout", { p_token: state.token }); },
+    getCurrentUser: function(){ return rpc("get_current_user", { p_token: state.token }); },
+    updateOwnProfile: function(d){ return rpc("update_own_profile", withToken({ p_name:d.name, p_house_number:d.houseNumber, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_photo_url:d.photoUrl||null })); },
+    changeOwnPin: function(oldPin, newPin){ return rpc("change_own_pin", withToken({ p_old_pin:oldPin, p_new_pin:newPin })); },
+    listMembers: function(search, bloodGroup){ return rpc("list_members", withToken({ p_search: search||null, p_blood_group: bloodGroup||null })); },
+    getDashboard: function(){ return rpc("get_dashboard", withToken({})); },
+    getCollectionTotals: function(){ return rpc("get_collection_totals", withToken({})); },
+    listPaymentStatus: function(m,y){ return rpc("list_payment_status", withToken({ p_period_month:m, p_period_year:y })); },
+    listMyCollections: function(){ return rpc("list_my_collections", withToken({})); },
+    listCollectionsAdmin: function(m,y){ return rpc("list_collections_admin", withToken({ p_period_month:m||null, p_period_year:y||null })); },
+    recordCollection: function(d){ return rpc("record_collection", withToken({ p_member_id:d.memberId, p_amount:d.amount, p_period_month:d.month, p_period_year:d.year, p_note:d.note||null })); },
+    deleteCollection: function(id){ return rpc("super_admin_delete_collection", withToken({ p_id:id })); },
+    listExpenses: function(category){ return rpc("list_expenses", withToken({ p_category:category||null, p_from:null, p_to:null })); },
+    recordExpense: function(d){ return rpc("record_expense", withToken({ p_description:d.description, p_category:d.category, p_amount:d.amount, p_date:d.date, p_receipt_photo_url:d.receiptUrl||null })); },
+    deleteExpense: function(id){ return rpc("super_admin_delete_expense", withToken({ p_id:id })); },
+    listPendingSignups: function(){ return rpc("list_pending_signups", withToken({})); },
+    approveSignup: function(id){ return rpc("approve_signup", withToken({ p_target_id:id })); },
+    rejectSignup: function(id, reason){ return rpc("reject_signup", withToken({ p_target_id:id, p_reason:reason||null })); },
+    adminResetPin: function(id, newPin){ return rpc("admin_reset_pin", withToken({ p_target_id:id, p_new_pin:newPin })); },
+    adminUpdateMember: function(d){ return rpc("admin_update_member", withToken({ p_target_id:d.id, p_name:d.name, p_house_number:d.houseNumber, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_photo_url:d.photoUrl||null })); },
+    setAdminRole: function(id, isAdmin){ return rpc("set_admin_role", withToken({ p_target_id:id, p_is_admin:isAdmin })); }
+  };
+
+  /* ---------------- Session bootstrap ---------------- */
+  function boot(){
+    if (!CONFIGURED) { state.booting = false; render(); return; }
+    if (!state.token) { state.booting = false; render(); return; }
+    api.getCurrentUser().then(function(user){
+      state.user = user || null;
+      if (!user) { state.token = ""; localStorage.removeItem("lh_token"); }
+      state.booting = false;
+      render();
+    }).catch(function(){
+      state.user = null; state.token = ""; localStorage.removeItem("lh_token");
+      state.booting = false; render();
+    });
+  }
+
+  function doLogout(){
+    api.logout().catch(function(){});
+    state.token = ""; state.user = null; state.view = "dashboard";
+    localStorage.removeItem("lh_token");
+    render();
+  }
+
+  /* ---------------- Nav ---------------- */
+  var NAV_ITEMS = [
+    { id:"dashboard", icon:"🏠", labelKey:"navDashboard" },
+    { id:"directory", icon:"👥", labelKey:"navDirectory" },
+    { id:"collections", icon:"💰", labelKey:"navCollections" },
+    { id:"expenses", icon:"🧾", labelKey:"navExpenses" },
+    { id:"admin", icon:"🛡️", labelKey:"navAdmin", adminOnly:true },
+    { id:"profile", icon:"👤", labelKey:"navProfile" }
+  ];
+
+  function renderNav(){
+    var nav = document.getElementById("bottomnav");
+    if (!state.user) { nav.classList.add("hidden"); nav.innerHTML = ""; return; }
+    nav.classList.remove("hidden");
+    nav.innerHTML = NAV_ITEMS.filter(function(it){ return !it.adminOnly || (state.user.is_admin || state.user.is_super_admin); })
+      .map(function(it){
+        return '<button data-nav="' + it.id + '" class="' + (state.view===it.id?"active":"") + '">' +
+          '<span class="navicon">' + it.icon + '</span><span>' + t(it.labelKey) + '</span></button>';
+      }).join("");
+  }
+
+  /* ---------------- Views ---------------- */
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  function viewEl(){ return document.getElementById("view"); }
+
+  function setView(html){ viewEl().innerHTML = html; }
+
+  function loadingHtml(){ return '<div class="center" style="padding:40px 0;"><div class="spinner"></div><p class="muted" style="margin-top:10px;">' + t("loading") + '</p></div>'; }
+
+  /* ---- Auth (login / signup) ---- */
+  var authTab = "login";
+  function renderAuth(){
+    var html = ''
+      + '<div class="card center" style="margin-bottom:18px;">'
+      + '  <h1>' + esc(t("appName")) + '</h1>'
+      + '  <p class="muted">' + esc(t("welfareIntro")) + '</p>'
+      + '</div>'
+      + '<div class="tabs">'
+      + '  <button data-authtab="login" class="' + (authTab==="login"?"active":"") + '">' + t("login") + '</button>'
+      + '  <button data-authtab="signup" class="' + (authTab==="signup"?"active":"") + '">' + t("signup") + '</button>'
+      + '</div>'
+      + '<div id="authFormWrap"></div>';
+    setView(html);
+    renderAuthForm();
+  }
+  function renderAuthForm(){
+    var wrap = document.getElementById("authFormWrap");
+    var msg = '<div id="authMsg"></div>';
+    if (authTab === "login") {
+      wrap.innerHTML = msg + ''
+        + '<form id="loginForm" class="card">'
+        + '  <label>' + t("phone") + '</label><input type="tel" name="phone" required autocomplete="tel">'
+        + '  <label>' + t("pin") + '</label><input type="password" name="pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" required autocomplete="current-password">'
+        + '  <button class="btn" type="submit">' + t("loginBtn") + '</button>'
+        + '</form>';
+      document.getElementById("loginForm").addEventListener("submit", onLoginSubmit);
+    } else {
+      wrap.innerHTML = msg + ''
+        + '<form id="signupForm" class="card">'
+        + '  <label>' + t("name") + '</label><input type="text" name="name" required>'
+        + '  <label>' + t("phone") + '</label><input type="tel" name="phone" required autocomplete="tel">'
+        + '  <label>' + t("houseNumber") + '</label><input type="text" name="houseNumber" required>'
+        + '  <label>' + t("occupation") + '</label><input type="text" name="occupation">'
+        + '  <label>' + t("bloodGroup") + '</label>' + bloodGroupSelect("bloodGroup", "")
+        + '  <label>' + t("pin") + '</label><input type="password" name="pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" required>'
+        + '  <label>' + t("pinConfirm") + '</label><input type="password" name="pinConfirm" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" required>'
+        + '  <button class="btn" type="submit">' + t("signupBtn") + '</button>'
+        + '</form>';
+      document.getElementById("signupForm").addEventListener("submit", onSignupSubmit);
+    }
+  }
+  function bloodGroupSelect(name, value){
+    var groups = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
+    var opts = '<option value="">' + t("selectOption") + '</option>' + groups.map(function(g){
+      return '<option value="' + g + '"' + (g===value?" selected":"") + '>' + g + '</option>';
+    }).join("");
+    return '<select name="' + name + '">' + opts + '</select>';
+  }
+  function showAuthMsg(text, type){
+    document.getElementById("authMsg").innerHTML = '<div class="msg ' + type + '">' + esc(text) + '</div>';
+  }
+  function onLoginSubmit(e){
+    e.preventDefault();
+    var f = e.target, btn = f.querySelector("button");
+    btn.disabled = true;
+    api.login(f.phone.value.trim(), f.pin.value.trim()).then(function(res){
+      state.token = res.token;
+      localStorage.setItem("lh_token", state.token);
+      return api.getCurrentUser();
+    }).then(function(user){
+      state.user = user;
+      state.view = "dashboard";
+      render();
+    }).catch(function(err){
+      btn.disabled = false;
+      showAuthMsg(err.message, "error");
+    });
+  }
+  function onSignupSubmit(e){
+    e.preventDefault();
+    var f = e.target, btn = f.querySelector("button");
+    if (f.pin.value !== f.pinConfirm.value) { showAuthMsg(t("pinsMismatch"), "error"); return; }
+    btn.disabled = true;
+    api.signup({
+      phone: f.phone.value.trim(), name: f.name.value.trim(), houseNumber: f.houseNumber.value.trim(),
+      occupation: f.occupation.value.trim(), bloodGroup: f.bloodGroup.value, pin: f.pin.value.trim()
+    }).then(function(){
+      authTab = "login";
+      renderAuthForm();
+      showAuthMsg(t("signupPendingMsg"), "success");
+    }).catch(function(err){
+      btn.disabled = false;
+      showAuthMsg(err.message, "error");
+    });
+  }
+
+  /* ---- Dashboard ---- */
+  function renderDashboard(){
+    setView(loadingHtml());
+    api.getDashboard().then(function(d){
+      var recentC = (d.recent_collections||[]).map(function(c){
+        return '<div class="list-item between"><span>' + bdi(c.house_number) + ' — ' + esc(c.name) + '</span>'
+          + '<span class="muted">' + t("paidFor") + ' ' + monthName(c.period_month) + ' ' + c.period_year + '</span></div>';
+      }).join("") || '<p class="muted">' + t("noActivityYet") + '</p>';
+      var recentE = (d.recent_expenses||[]).map(function(x){
+        return '<div class="list-item between"><span>' + esc(x.description) + '</span><span class="amount">' + money(x.amount) + '</span></div>';
+      }).join("") || '<p class="muted">' + t("noActivityYet") + '</p>';
+      setView(''
+        + '<div class="card balance-card">'
+        + '  <div class="muted">' + t("balance") + '</div>'
+        + '  <div class="balance-amount">' + money(d.balance) + '</div>'
+        + '  <div class="balance-sub"><span>' + t("totalCollected") + ': ' + money(d.total_collections) + '</span>'
+        + '  <span>' + t("totalSpent") + ': ' + money(d.total_expenses) + '</span></div>'
+        + '</div>'
+        + '<div class="card"><h3>' + t("recentCollections") + '</h3>' + recentC + '</div>'
+        + '<div class="card"><h3>' + t("recentExpenses") + '</h3>' + recentE + '</div>'
+      );
+    }).catch(function(err){ setView('<div class="msg error">' + esc(err.message) + '</div>'); });
+  }
+
+  /* ---- Directory ---- */
+  var directoryState = { search:"", bloodGroup:"" };
+  function renderDirectory(){
+    setView(''
+      + '<h1>' + t("directoryTitle") + '</h1>'
+      + '<div class="card">'
+      + '  <input type="text" id="dirSearch" placeholder="' + t("searchPlaceholder") + '" value="' + esc(directoryState.search) + '">'
+      + '  <div style="margin-top:10px;">' + bloodGroupFilterSelect() + '</div>'
+      + '</div>'
+      + '<div id="dirList">' + loadingHtml() + '</div>'
+    );
+    document.getElementById("dirSearch").addEventListener("input", debounce(function(e){
+      directoryState.search = e.target.value; loadDirectoryList();
+    }, 300));
+    document.getElementById("dirBloodGroup").addEventListener("change", function(e){
+      directoryState.bloodGroup = e.target.value; loadDirectoryList();
+    });
+    loadDirectoryList();
+  }
+  function bloodGroupFilterSelect(){
+    var groups = ["A+","A-","B+","B-","AB+","AB-","O+","O-"];
+    var opts = '<option value="">' + t("allBloodGroups") + '</option>' + groups.map(function(g){
+      return '<option value="' + g + '"' + (g===directoryState.bloodGroup?" selected":"") + '>' + g + '</option>';
+    }).join("");
+    return '<select id="dirBloodGroup">' + opts + '</select>';
+  }
+  function loadDirectoryList(){
+    var box = document.getElementById("dirList");
+    api.listMembers(directoryState.search, directoryState.bloodGroup).then(function(members){
+      if (!members || !members.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
+      box.innerHTML = members.map(function(m){
+        return '<div class="card member-card">'
+          + '  <div><strong>' + esc(m.name) + '</strong>' + (m.is_admin ? ' <span class="badge admin">' + t("navAdmin") + '</span>' : '') + '<br>'
+          + '  <span class="muted">' + bdi(m.house_number) + (m.occupation ? " · " + esc(m.occupation) : "") + '</span><br>'
+          + (m.blood_group ? '<span class="badge paid">' + bdi(m.blood_group) + '</span>' : '')
+          + '  </div>'
+          + '  <a class="btn small secondary" href="tel:' + esc(m.phone) + '">' + t("call") + '</a>'
+          + '</div>';
+      }).join("");
+    }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+  }
+  function debounce(fn, ms){ var tm; return function(){ var a=arguments, c=this; clearTimeout(tm); tm=setTimeout(function(){ fn.apply(c,a); }, ms); }; }
+
+  /* ---- Collections ---- */
+  var collectionsPeriod = (function(){ var now=new Date(); return { month: now.getMonth()+1, year: now.getFullYear() }; })();
+  function monthYearSelect(idM, idY){
+    var now = new Date(); var years = [];
+    for (var y = now.getFullYear()-2; y <= now.getFullYear()+1; y++) years.push(y);
+    var mOpts = MONTHS.en.map(function(_, i){
+      return '<option value="' + (i+1) + '"' + (collectionsPeriod.month===i+1?" selected":"") + '>' + monthName(i+1) + '</option>';
+    }).join("");
+    var yOpts = years.map(function(y){
+      return '<option value="' + y + '"' + (collectionsPeriod.year===y?" selected":"") + '>' + y + '</option>';
+    }).join("");
+    return '<div class="row"><select id="' + idM + '">' + mOpts + '</select><select id="' + idY + '">' + yOpts + '</select></div>';
+  }
+  function renderCollections(){
+    var isAdmin = state.user.is_admin || state.user.is_super_admin;
+    setView(''
+      + '<h1>' + t("collectionsTitle") + '</h1>'
+      + '<div class="card" id="totalsCard">' + loadingHtml() + '</div>'
+      + '<div class="card">'
+      + '  <h3>' + t("paymentStatusTitle") + '</h3>'
+      + monthYearSelect("psMonth","psYear")
+      + '  <div id="paymentStatusList" style="margin-top:10px;">' + loadingHtml() + '</div>'
+      + '</div>'
+      + '<div class="card"><h3>' + t("myContributions") + '</h3><div id="myCollectionsList">' + loadingHtml() + '</div></div>'
+      + (isAdmin ? adminCollectionsHtml() : '')
+    );
+    api.getCollectionTotals().then(function(d){
+      document.getElementById("totalsCard").innerHTML = ''
+        + '<div class="grid2">'
+        + '<div class="center"><div class="muted">' + t("thisMonth") + '</div><div class="amount">' + money(d.this_month) + '</div></div>'
+        + '<div class="center"><div class="muted">' + t("thisYear") + '</div><div class="amount">' + money(d.this_year) + '</div></div>'
+        + '</div><div class="center" style="margin-top:10px;"><div class="muted">' + t("allTime") + '</div><div class="amount">' + money(d.all_time) + '</div></div>';
+    }).catch(function(err){ document.getElementById("totalsCard").innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+
+    document.getElementById("psMonth").addEventListener("change", function(e){ collectionsPeriod.month = +e.target.value; loadPaymentStatus(); });
+    document.getElementById("psYear").addEventListener("change", function(e){ collectionsPeriod.year = +e.target.value; loadPaymentStatus(); });
+    loadPaymentStatus();
+
+    api.listMyCollections().then(function(rows){
+      var box = document.getElementById("myCollectionsList");
+      if (!rows.length) { box.innerHTML = '<p class="muted">' + t("noContributionsYet") + '</p>'; return; }
+      box.innerHTML = rows.map(function(r){
+        return '<div class="list-item between"><span>' + monthName(r.period_month) + ' ' + r.period_year + '</span><span class="amount">' + money(r.amount) + '</span></div>';
+      }).join("");
+    }).catch(function(err){ document.getElementById("myCollectionsList").innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+
+    if (isAdmin) bindAdminCollections();
+  }
+  function loadPaymentStatus(){
+    var box = document.getElementById("paymentStatusList");
+    box.innerHTML = loadingHtml();
+    api.listPaymentStatus(collectionsPeriod.month, collectionsPeriod.year).then(function(rows){
+      box.innerHTML = rows.map(function(r){
+        return '<div class="list-item between"><span>' + bdi(r.house_number) + ' — ' + esc(r.name) + '</span>'
+          + '<span class="badge ' + (r.paid?"paid":"unpaid") + '">' + (r.paid ? "✓" : "✕") + '</span></div>';
+      }).join("");
+    }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+  }
+  function adminCollectionsHtml(){
+    return ''
+      + '<div class="card">'
+      + '  <h3>' + t("recordCollection") + '</h3>'
+      + '  <form id="recordCollectionForm">'
+      + '    <label>' + t("member") + '</label><select name="memberId" id="collMemberSelect" required><option value="">' + t("selectOption") + '</option></select>'
+      + '    <label>' + t("amount") + '</label><input type="number" name="amount" min="1" step="1" required>'
+      + '    <label>' + t("period") + '</label>' + monthYearSelect("recMonth","recYear")
+      + '    <label>' + t("note") + '</label><input type="text" name="note">'
+      + '    <div id="recordCollMsg"></div>'
+      + '    <button class="btn" type="submit">' + t("submit") + '</button>'
+      + '  </form>'
+      + '</div>'
+      + '<div class="card"><h3>' + t("allCollections") + '</h3><div id="allCollectionsList">' + loadingHtml() + '</div></div>';
+  }
+  function bindAdminCollections(){
+    api.listMembers("", "").then(function(members){
+      var sel = document.getElementById("collMemberSelect");
+      if (!sel) return;
+      sel.innerHTML += members.map(function(m){ return '<option value="' + m.id + '">' + esc(m.house_number) + ' — ' + esc(m.name) + '</option>'; }).join("");
+    }).catch(function(){});
+    var form = document.getElementById("recordCollectionForm");
+    if (form) form.addEventListener("submit", function(e){
+      e.preventDefault();
+      var f = e.target, btn = f.querySelector("button");
+      btn.disabled = true;
+      api.recordCollection({
+        memberId: f.memberId.value, amount: +f.amount.value,
+        month: +document.getElementById("recMonth").value, year: +document.getElementById("recYear").value,
+        note: f.note.value.trim()
+      }).then(function(){
+        f.reset();
+        btn.disabled = false;
+        toast(t("submit") + " ✓");
+        renderCollections();
+      }).catch(function(err){
+        btn.disabled = false;
+        document.getElementById("recordCollMsg").innerHTML = '<div class="msg error">' + esc(err.message) + '</div>';
+      });
+    });
+    var listBox = document.getElementById("allCollectionsList");
+    api.listCollectionsAdmin().then(function(rows){
+      if (!rows.length) { listBox.innerHTML = '<p class="muted">' + t("noContributionsYet") + '</p>'; return; }
+      listBox.innerHTML = rows.map(function(r){
+        return '<div class="list-item between">'
+          + '<span>' + bdi(r.house_number) + ' — ' + esc(r.member_name) + ' (' + monthName(r.period_month) + ' ' + r.period_year + ')</span>'
+          + '<span class="amount">' + money(r.amount) + (state.user.is_super_admin ? ' <button class="btn small danger" data-del-coll="' + r.id + '">' + t("delete") + '</button>' : '') + '</span>'
+          + '</div>';
+      }).join("");
+      listBox.querySelectorAll("[data-del-coll]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          api.deleteCollection(btn.getAttribute("data-del-coll")).then(function(){ renderCollections(); }).catch(function(err){ toast(err.message); });
+        });
+      });
+    }).catch(function(err){ listBox.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+  }
+
+  /* ---- Expenses ---- */
+  var CATEGORIES = ["misc","streetlights","security","transformer","other"];
+  function categoryLabel(c){
+    var map = { misc:"categoryMisc", streetlights:"categoryStreetlights", security:"categorySecurity", transformer:"categoryTransformer", other:"categoryOther" };
+    return map[c] ? t(map[c]) : c;
+  }
+  function renderExpenses(){
+    var isAdmin = state.user.is_admin || state.user.is_super_admin;
+    setView(''
+      + '<h1>' + t("expensesTitle") + '</h1>'
+      + (isAdmin ? expenseFormHtml() : '')
+      + '<div class="card"><h3>' + t("expensesTitle") + '</h3><div id="expensesList">' + loadingHtml() + '</div></div>'
+    );
+    if (isAdmin) bindExpenseForm();
+    loadExpensesList();
+  }
+  function expenseFormHtml(){
+    var opts = CATEGORIES.map(function(c){ return '<option value="' + c + '">' + categoryLabel(c) + '</option>'; }).join("");
+    return ''
+      + '<div class="card">'
+      + '  <h3>' + t("recordExpense") + '</h3>'
+      + '  <form id="recordExpenseForm">'
+      + '    <label>' + t("description") + '</label><input type="text" name="description" required>'
+      + '    <label>' + t("category") + '</label><select name="category">' + opts + '</select>'
+      + '    <label>' + t("amount") + '</label><input type="number" name="amount" min="1" step="1" required>'
+      + '    <label>' + t("date") + '</label><input type="date" name="date" value="' + new Date().toISOString().slice(0,10) + '" required>'
+      + '    <label>' + t("receiptUrl") + '</label><input type="url" name="receiptUrl">'
+      + '    <div id="recordExpMsg"></div>'
+      + '    <button class="btn" type="submit">' + t("submit") + '</button>'
+      + '  </form>'
+      + '</div>';
+  }
+  function bindExpenseForm(){
+    var form = document.getElementById("recordExpenseForm");
+    if (!form) return;
+    form.addEventListener("submit", function(e){
+      e.preventDefault();
+      var f = e.target, btn = f.querySelector("button");
+      btn.disabled = true;
+      api.recordExpense({
+        description: f.description.value.trim(), category: f.category.value, amount: +f.amount.value,
+        date: f.date.value, receiptUrl: f.receiptUrl.value.trim()
+      }).then(function(){
+        f.reset();
+        btn.disabled = false;
+        toast(t("submit") + " ✓");
+        loadExpensesList();
+      }).catch(function(err){
+        btn.disabled = false;
+        document.getElementById("recordExpMsg").innerHTML = '<div class="msg error">' + esc(err.message) + '</div>';
+      });
+    });
+  }
+  function loadExpensesList(){
+    var box = document.getElementById("expensesList");
+    var isAdmin = state.user.is_admin || state.user.is_super_admin;
+    api.listExpenses().then(function(rows){
+      if (!rows.length) { box.innerHTML = '<p class="muted">' + t("noExpensesYet") + '</p>'; return; }
+      box.innerHTML = rows.map(function(r){
+        return '<div class="list-item">'
+          + '<div class="between"><strong>' + esc(r.description) + '</strong><span class="amount">' + money(r.amount) + '</span></div>'
+          + '<div class="muted">' + categoryLabel(r.category) + ' · ' + esc(r.date)
+          + (r.receipt_photo_url ? ' · <a href="' + esc(r.receipt_photo_url) + '" target="_blank" rel="noopener">📎</a>' : '')
+          + (state.user.is_super_admin ? ' · <button class="btn small danger" data-del-exp="' + r.id + '">' + t("delete") + '</button>' : '')
+          + '</div>'
+          + '</div>';
+      }).join("");
+      box.querySelectorAll("[data-del-exp]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          api.deleteExpense(btn.getAttribute("data-del-exp")).then(function(){ loadExpensesList(); }).catch(function(err){ toast(err.message); });
+        });
+      });
+    }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+  }
+
+  /* ---- Admin ---- */
+  function renderAdmin(){
+    setView(''
+      + '<h1>' + t("adminTitle") + '</h1>'
+      + '<div class="card"><h3>' + t("pendingSignups") + '</h3><div id="pendingList">' + loadingHtml() + '</div></div>'
+      + '<div class="card"><h3>' + t("members") + '</h3><div id="adminMembersList">' + loadingHtml() + '</div></div>'
+    );
+    loadPendingSignups();
+    loadAdminMembers();
+  }
+  function loadPendingSignups(){
+    var box = document.getElementById("pendingList");
+    api.listPendingSignups().then(function(rows){
+      if (!rows.length) { box.innerHTML = '<p class="muted">' + t("noPendingSignups") + '</p>'; return; }
+      box.innerHTML = rows.map(function(r){
+        return '<div class="card">'
+          + '<strong>' + esc(r.name) + '</strong> · ' + bdi(r.house_number) + '<br>'
+          + '<span class="muted">' + bdi(r.phone) + (r.occupation ? " · " + esc(r.occupation) : "") + (r.blood_group ? " · " + bdi(r.blood_group) : "") + '</span>'
+          + '<div class="row" style="margin-top:10px;">'
+          + '  <button class="btn small" data-approve="' + r.id + '">' + t("approve") + '</button>'
+          + '  <button class="btn small danger" data-reject="' + r.id + '">' + t("reject") + '</button>'
+          + '</div></div>';
+      }).join("");
+      box.querySelectorAll("[data-approve]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          api.approveSignup(btn.getAttribute("data-approve")).then(loadPendingSignups).then(loadAdminMembers).catch(function(err){ toast(err.message); });
+        });
+      });
+      box.querySelectorAll("[data-reject]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var reason = prompt(t("rejectReason")) || "";
+          api.rejectSignup(btn.getAttribute("data-reject"), reason).then(loadPendingSignups).catch(function(err){ toast(err.message); });
+        });
+      });
+    }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+  }
+  function loadAdminMembers(){
+    var box = document.getElementById("adminMembersList");
+    api.listMembers("", "").then(function(rows){
+      box.innerHTML = rows.map(function(m){
+        var toggleBtn = state.user.is_super_admin
+          ? '<button class="btn small secondary" data-toggle-admin="' + m.id + '" data-is-admin="' + (m.is_admin?"1":"0") + '">' + (m.is_admin ? t("removeAdmin") : t("makeAdmin")) + '</button>'
+          : '';
+        return '<div class="card">'
+          + '<div class="between"><strong>' + esc(m.name) + '</strong>' + (m.is_admin ? '<span class="badge admin">' + t("navAdmin") + '</span>' : '') + '</div>'
+          + '<span class="muted">' + bdi(m.house_number) + ' · ' + bdi(m.phone) + '</span>'
+          + '<div class="row" style="margin-top:10px;">'
+          + '  <button class="btn small secondary" data-reset-pin="' + m.id + '">' + t("resetPin") + '</button>'
+          + toggleBtn
+          + '</div></div>';
+      }).join("");
+      box.querySelectorAll("[data-reset-pin]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var pin = prompt(t("newPin"));
+          if (!pin) return;
+          api.adminResetPin(btn.getAttribute("data-reset-pin"), pin.trim()).then(function(){ toast(t("resetPin") + " ✓"); }).catch(function(err){ toast(err.message); });
+        });
+      });
+      box.querySelectorAll("[data-toggle-admin]").forEach(function(btn){
+        btn.addEventListener("click", function(){
+          var isAdmin = btn.getAttribute("data-is-admin") === "1";
+          api.setAdminRole(btn.getAttribute("data-toggle-admin"), !isAdmin).then(loadAdminMembers).catch(function(err){ toast(err.message); });
+        });
+      });
+    }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+  }
+
+  /* ---- Profile ---- */
+  function renderProfile(){
+    var u = state.user;
+    setView(''
+      + '<h1>' + t("profileTitle") + '</h1>'
+      + '<form id="profileForm" class="card">'
+      + '  <label>' + t("name") + '</label><input type="text" name="name" value="' + esc(u.name) + '" required>'
+      + '  <label>' + t("houseNumber") + '</label><input type="text" name="houseNumber" value="' + esc(u.house_number) + '" required>'
+      + '  <label>' + t("occupation") + '</label><input type="text" name="occupation" value="' + esc(u.occupation||"") + '">'
+      + '  <label>' + t("bloodGroup") + '</label>' + bloodGroupSelect("bloodGroup", u.blood_group||"")
+      + '  <div id="profileMsg"></div>'
+      + '  <button class="btn" type="submit">' + t("editProfile") + '</button>'
+      + '</form>'
+      + '<form id="pinForm" class="card">'
+      + '  <h3>' + t("changePin") + '</h3>'
+      + '  <label>' + t("currentPin") + '</label><input type="password" name="oldPin" inputmode="numeric" maxlength="4" required>'
+      + '  <label>' + t("newPin") + '</label><input type="password" name="newPin" inputmode="numeric" maxlength="4" required>'
+      + '  <div id="pinMsg"></div>'
+      + '  <button class="btn secondary" type="submit">' + t("changePin") + '</button>'
+      + '</form>'
+      + '<button class="btn danger" id="logoutBtn">' + t("logout") + '</button>'
+    );
+    document.getElementById("profileForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var f = e.target, btn = f.querySelector("button");
+      btn.disabled = true;
+      api.updateOwnProfile({ name:f.name.value.trim(), houseNumber:f.houseNumber.value.trim(), occupation:f.occupation.value.trim(), bloodGroup:f.bloodGroup.value }).then(function(){
+        return api.getCurrentUser();
+      }).then(function(user){
+        state.user = user; btn.disabled = false;
+        document.getElementById("profileMsg").innerHTML = '<div class="msg success">' + t("editProfile") + ' ✓</div>';
+      }).catch(function(err){ btn.disabled = false; document.getElementById("profileMsg").innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+    });
+    document.getElementById("pinForm").addEventListener("submit", function(e){
+      e.preventDefault();
+      var f = e.target, btn = f.querySelector("button");
+      btn.disabled = true;
+      api.changeOwnPin(f.oldPin.value.trim(), f.newPin.value.trim()).then(function(){
+        f.reset(); btn.disabled = false;
+        document.getElementById("pinMsg").innerHTML = '<div class="msg success">' + t("changePin") + ' ✓</div>';
+      }).catch(function(err){ btn.disabled = false; document.getElementById("pinMsg").innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
+    });
+    document.getElementById("logoutBtn").addEventListener("click", doLogout);
+  }
+
+  /* ---------------- Router ---------------- */
+  var VIEW_RENDERERS = {
+    dashboard: renderDashboard, directory: renderDirectory, collections: renderCollections,
+    expenses: renderExpenses, admin: renderAdmin, profile: renderProfile
+  };
+  function navigate(view){
+    state.view = view;
+    render();
+  }
+  function render(){
+    document.getElementById("brand").textContent = t("appName");
+    document.getElementById("langBtn").textContent = state.lang === "ur" ? "English" : "اردو";
+    if (!CONFIGURED) {
+      setView('<div class="msg warn">' + esc(t("notConfigured")) + '</div>');
+      document.getElementById("bottomnav").classList.add("hidden");
+      return;
+    }
+    if (state.booting) { setView(loadingHtml()); return; }
+    if (!state.user) { renderNav(); renderAuth(); return; }
+    renderNav();
+    (VIEW_RENDERERS[state.view] || renderDashboard)();
+  }
+
+  document.getElementById("langBtn").addEventListener("click", function(){
+    setLang(state.lang === "ur" ? "en" : "ur");
+  });
+  document.getElementById("bottomnav").addEventListener("click", function(e){
+    var btn = e.target.closest("[data-nav]");
+    if (btn) navigate(btn.getAttribute("data-nav"));
+  });
+  document.addEventListener("click", function(e){
+    var tab = e.target.closest("[data-authtab]");
+    if (tab) { authTab = tab.getAttribute("data-authtab"); renderAuth(); }
+  });
+
+  setLang(state.lang);
+  boot();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("sw.js").catch(function(){});
+    });
+  }
+})();
+</script>
+</body>
+</html>
