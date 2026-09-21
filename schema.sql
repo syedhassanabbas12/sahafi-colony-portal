@@ -23,7 +23,7 @@
 -- an account — they're owned by the house. `residents` is the directory
 -- seed/cross-check table (imported once, editable by admins afterward);
 -- `users` is purely app accounts (phone+PIN login). The two are merged at
--- read time (list_members, list_payment_status) so the directory and the
+-- read time (list_houses, list_payment_status) so the directory and the
 -- payment-status board show every known house, signed up or not.
 
 create extension if not exists pgcrypto;
@@ -507,8 +507,8 @@ end;
 $$;
 
 -- Approved accounts with their real user id, for the admin Members panel
--- (reset PIN / promote-demote) — distinct from list_members, the public
--- merged directory, which has no single row id since a directory entry can
+-- (reset PIN / promote-demote) — distinct from list_houses, the public
+-- merged directory, which has no single row id since a house's members can
 -- come from residents, users, or both.
 create or replace function public.admin_list_accounts(p_token text)
 returns setof json
@@ -625,7 +625,14 @@ $$;
 -- so every known house shows up whether or not it has an app account yet.
 -- ============================================================================
 
-create or replace function public.list_members(p_token text, p_search text default null, p_blood_group text default null)
+drop function if exists public.list_members(text, text, text);
+
+-- One row per house, not per account — a house with two residents who each
+-- signed up separately used to show as two directory rows ("135 houses"
+-- for 130 real ones). Each house's `members` array lists everyone at that
+-- house individually (still searchable/filterable by name or blood group
+-- per person), but the house itself is the unit of the result.
+create or replace function public.list_houses(p_token text, p_search text default null, p_blood_group text default null)
 returns setof json
 language plpgsql
 security definer
@@ -634,35 +641,62 @@ as $$
 begin
   perform public._current_user(p_token);
   return query
-    with u as (
-      select block, house_number, name, phone, occupation, blood_group, is_admin
+    with house_people as (
+      -- signed-up accounts for a house always take precedence
+      select block, house_number, name, phone, occupation, blood_group, is_admin, true as has_account
       from public.users where status = 'approved'
+      union all
+      -- the imported directory entry, only for houses nobody has signed up for yet
+      select r.block, r.house_number, r.name, null::text, r.occupation, r.blood_group, false, false
+      from public.residents r
+      where not r.is_vacant
+        and not exists (
+          select 1 from public.users u where u.status = 'approved' and u.block = r.block and u.house_number = r.house_number
+        )
     ),
-    r as (
-      select block, house_number, name, occupation, blood_group, is_vacant
-      from public.residents
+    vacant_houses as (
+      select r.block, r.house_number
+      from public.residents r
+      where r.is_vacant
+        and not exists (
+          select 1 from public.users u where u.status = 'approved' and u.block = r.block and u.house_number = r.house_number
+        )
+    ),
+    matching_houses as (
+      select distinct block, house_number from house_people
+      where (p_blood_group is null or p_blood_group = '' or blood_group = p_blood_group)
+        and (p_search is null or p_search = '' or house_number ilike '%' || p_search || '%' or name ilike '%' || p_search || '%')
+    ),
+    occupied as (
+      select hp.block, hp.house_number,
+        json_build_object(
+          'block', hp.block, 'house_number', hp.house_number, 'is_vacant', false,
+          'members', json_agg(
+            json_build_object(
+              'name', hp.name, 'phone', hp.phone, 'occupation', hp.occupation,
+              'blood_group', hp.blood_group, 'is_admin', hp.is_admin, 'has_account', hp.has_account
+            ) order by hp.name
+          )
+        ) as row_json
+      from house_people hp
+      join matching_houses mh on mh.block = hp.block and mh.house_number = hp.house_number
+      group by hp.block, hp.house_number
+    ),
+    vacant as (
+      select v.block, v.house_number,
+        json_build_object('block', v.block, 'house_number', v.house_number, 'is_vacant', true, 'members', '[]'::json) as row_json
+      from vacant_houses v
+      where (p_blood_group is null or p_blood_group = '')
+        and (p_search is null or p_search = '' or v.house_number ilike '%' || p_search || '%')
+    ),
+    combined as (
+      select * from occupied
+      union all
+      select * from vacant
     )
-    select json_build_object(
-      'block', coalesce(u.block, r.block),
-      'house_number', coalesce(u.house_number, r.house_number),
-      'name', coalesce(u.name, r.name),
-      'phone', u.phone,
-      'occupation', coalesce(u.occupation, r.occupation),
-      'blood_group', coalesce(u.blood_group, r.blood_group),
-      'is_admin', coalesce(u.is_admin, false),
-      'is_vacant', coalesce(r.is_vacant, false),
-      'has_account', (u.house_number is not null)
-    )
-    from u
-    full outer join r on r.block = u.block and r.house_number = u.house_number
-    where
-      (p_blood_group is null or p_blood_group = '' or coalesce(u.blood_group, r.blood_group) = p_blood_group)
-      and (
-        p_search is null or p_search = ''
-        or coalesce(u.name, r.name) ilike '%' || p_search || '%'
-        or coalesce(u.house_number, r.house_number) ilike '%' || p_search || '%'
-      )
-    order by coalesce(u.block, r.block), public._house_num_key(coalesce(u.house_number, r.house_number)), coalesce(u.house_number, r.house_number);
+    select row_json
+    from combined
+    order by block, public._house_num_key(house_number), house_number;
 end;
 $$;
 
@@ -734,7 +768,12 @@ begin
   perform public._current_user(p_token);
   return query
     with u as (
-      select block, house_number, name from public.users where status = 'approved'
+      -- one row per house even when it has multiple accounts (e.g. two
+      -- residents who each signed up separately) — combine their names
+      -- rather than producing a duplicate row per account.
+      select block, house_number, string_agg(name, ', ' order by name) as name
+      from public.users where status = 'approved'
+      group by block, house_number
     ),
     r as (
       select block, house_number, name, is_vacant from public.residents
@@ -957,7 +996,7 @@ grant execute on function
   public.list_residents(text),
   public.admin_upsert_resident(text, text, text, text, text, text, boolean),
   public.admin_delete_resident(text, text, text),
-  public.list_members(text, text, text),
+  public.list_houses(text, text, text),
   public.record_collection(text, text, text, numeric, int, int, text),
   public.get_collection_totals(text),
   public.list_payment_status(text, int, int),

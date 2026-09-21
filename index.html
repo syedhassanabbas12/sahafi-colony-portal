@@ -286,7 +286,7 @@
     getCurrentUser: function(){ return rpc("get_current_user", { p_token: state.token }); },
     updateOwnProfile: function(d){ return rpc("update_own_profile", withToken({ p_name:d.name, p_house_number:d.houseNumber, p_block:d.block||"E", p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_photo_url:d.photoUrl||null })); },
     changeOwnPin: function(oldPin, newPin){ return rpc("change_own_pin", withToken({ p_old_pin:oldPin, p_new_pin:newPin })); },
-    listMembers: function(search, bloodGroup){ return rpc("list_members", withToken({ p_search: search||null, p_blood_group: bloodGroup||null })); },
+    listHouses: function(search, bloodGroup){ return rpc("list_houses", withToken({ p_search: search||null, p_blood_group: bloodGroup||null })); },
     adminListAccounts: function(){ return rpc("admin_list_accounts", withToken({})); },
     listResidents: function(){ return rpc("list_residents", withToken({})); },
     adminUpsertResident: function(d){ return rpc("admin_upsert_resident", withToken({ p_block:d.block||"E", p_house_number:d.houseNumber, p_name:d.name||null, p_occupation:d.occupation||null, p_blood_group:d.bloodGroup||null, p_is_vacant:!!d.isVacant })); },
@@ -515,21 +515,26 @@
   function loadDirectoryList(){
     var box = document.getElementById("dirList");
     var countEl = document.getElementById("dirCount");
-    api.listMembers(directoryState.search, directoryState.bloodGroup).then(function(members){
-      if (countEl) countEl.textContent = tCount("housesCount", members ? members.length : 0);
-      if (!members || !members.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
-      box.innerHTML = members.map(function(m){
-        var nameLine = m.is_vacant
-          ? '<em class="muted">' + t("isVacant") + '</em>'
-          : (esc(m.name || t("house") + " " + (m.block||"E") + "-" + m.house_number) + (m.is_admin ? ' <span class="badge admin">' + t("navAdmin") + '</span>' : ''));
-        return '<div class="card member-card">'
-          + '  <div><strong>' + nameLine + '</strong><br>'
-          + '  <span class="muted">' + houseLabel(m.block, m.house_number) + (m.occupation ? " · " + esc(m.occupation) : "") + '</span><br>'
-          + (m.blood_group ? '<span class="badge paid">' + bdi(m.blood_group) + '</span>' : '')
-          + (!m.has_account ? ' <span class="badge">' + t("noAccountYet") + '</span>' : '')
-          + '  </div>'
-          + (m.phone ? '<a class="btn small secondary" href="tel:' + esc(m.phone) + '">' + t("call") + '</a>' : '')
-          + '</div>';
+    api.listHouses(directoryState.search, directoryState.bloodGroup).then(function(houses){
+      if (countEl) countEl.textContent = tCount("housesCount", houses ? houses.length : 0);
+      if (!houses || !houses.length) { box.innerHTML = '<p class="muted">' + t("noActivityYet") + '</p>'; return; }
+      box.innerHTML = houses.map(function(h){
+        var header = '<h3>' + houseLabel(h.block, h.house_number) + '</h3>';
+        if (h.is_vacant) {
+          return '<div class="card">' + header + '<em class="muted">' + t("isVacant") + '</em></div>';
+        }
+        var rows = (h.members || []).map(function(m){
+          return '<div class="list-item member-card">'
+            + '  <div><strong>' + esc(m.name || (t("house") + " " + h.block + "-" + h.house_number)) + '</strong>'
+            + (m.is_admin ? ' <span class="badge admin">' + t("navAdmin") + '</span>' : '')
+            + (!m.has_account ? ' <span class="badge">' + t("noAccountYet") + '</span>' : '')
+            + (m.occupation ? '<br><span class="muted">' + esc(m.occupation) + '</span>' : '')
+            + (m.blood_group ? '<br><span class="badge paid">' + bdi(m.blood_group) + '</span>' : '')
+            + '  </div>'
+            + (m.phone ? '<a class="btn small secondary" href="tel:' + esc(m.phone) + '">' + t("call") + '</a>' : '')
+            + '</div>';
+        }).join("");
+        return '<div class="card">' + header + rows + '</div>';
       }).join("");
     }).catch(function(err){ box.innerHTML = '<div class="msg error">' + esc(err.message) + '</div>'; });
   }
@@ -640,11 +645,12 @@
     return '<div class="card"><h3>' + t("allCollections") + '</h3><div id="allCollectionsList">' + loadingHtml() + '</div></div>';
   }
   function bindAdminCollections(){
-    api.listMembers("", "").then(function(houses){
+    api.listHouses("", "").then(function(houses){
       var sel = document.getElementById("collHouseSelect");
       if (!sel) return;
       sel.innerHTML += houses.map(function(h){
-        var label = (h.block||"E") + "-" + h.house_number + (h.name ? " — " + h.name : h.is_vacant ? " (" + t("vacant") + ")" : "");
+        var names = (h.members || []).map(function(m){ return m.name; }).filter(Boolean).join(", ");
+        var label = (h.block||"E") + "-" + h.house_number + (names ? " — " + names : h.is_vacant ? " (" + t("vacant") + ")" : "");
         return '<option value="' + esc((h.block||"E") + "|" + h.house_number) + '">' + esc(label) + '</option>';
       }).join("");
     }).catch(function(){});

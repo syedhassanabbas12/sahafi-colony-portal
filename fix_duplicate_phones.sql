@@ -6,13 +6,24 @@
 -- Run the SELECT below first and read its output — it shows exactly which
 -- accounts will be merged and into which one, before anything changes.
 --
--- Merge rule when a phone number has duplicate accounts: keep the account
--- that is Super Admin > Admin > Approved > oldest (in that priority order),
--- then fold every other duplicate's admin flags, approval status, and any
--- profile field the keeper is missing (occupation/blood group/photo) into
--- it, reassign anything that pointed at a deleted duplicate as its
--- approver, and delete the rest. Financial records (collections/expenses)
--- are untouched either way — they're keyed to the house, not the account.
+-- Default merge rule when a phone number has duplicate accounts: keep the
+-- account that is Super Admin > Admin > Approved > oldest (in that priority
+-- order). To keep a *different* account instead for a specific number, add
+-- a row to _phone_keep_overrides below using the phone exactly as it was
+-- entered on the account you want kept (as shown in the preview's "phone as
+-- entered" text) — the loop checks this list before falling back to the
+-- default rule. Either way, every other duplicate's admin flags, approval
+-- status, and any profile field the keeper is missing (occupation/blood
+-- group/photo) get folded into the survivor, anything that pointed at a
+-- deleted duplicate as its approver gets reassigned, and the rest are
+-- deleted. Financial records (collections/expenses) are untouched either
+-- way — they're keyed to the house, not the account.
+
+create temporary table _phone_keep_overrides (phone_as_entered text);
+insert into _phone_keep_overrides (phone_as_entered) values
+  ('03009497186');
+  -- add more rows here, one per line, for any other group where you want a
+  -- specific account kept instead of the default pick
 
 -- ============================================================================
 -- STEP 1 — preview: which accounts are duplicates, and which one wins
@@ -26,7 +37,8 @@ ranked as (
   select *,
     row_number() over (
       partition by norm_phone
-      order by is_super_admin desc, is_admin desc, (status = 'approved') desc, created_at asc
+      order by (phone in (select phone_as_entered from _phone_keep_overrides)) desc,
+               is_super_admin desc, is_admin desc, (status = 'approved') desc, created_at asc
     ) as rnk
   from normalized
 )
@@ -56,11 +68,21 @@ begin
     group by public._normalize_phone(phone)
     having count(*) > 1
   loop
+    -- manual override first, if one was given for this group
     select id into keeper
     from public.users
     where public._normalize_phone(phone) = grp.norm_phone
-    order by is_super_admin desc, is_admin desc, (status = 'approved') desc, created_at asc
+      and phone in (select phone_as_entered from _phone_keep_overrides)
     limit 1;
+
+    -- otherwise the default rule
+    if keeper is null then
+      select id into keeper
+      from public.users
+      where public._normalize_phone(phone) = grp.norm_phone
+      order by is_super_admin desc, is_admin desc, (status = 'approved') desc, created_at asc
+      limit 1;
+    end if;
 
     update public.users k set
       is_admin = k.is_admin or exists(
